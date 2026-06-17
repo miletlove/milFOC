@@ -13,10 +13,11 @@
 
 - [硬件平台](#硬件平台)
 - [工程架构](#工程架构)
+- [层级详解](#层级详解)
 - [功能特性](#功能特性)
 - [快速开始](#快速开始)
-- [目录结构](#目录结构)
-- [控制环路](#控制环路)
+- [完整目录树](#完整目录树)
+- [FOC 数据流与时序](#foc-数据流与时序)
 - [开发指南](#开发指南)
 - [参考项目](#参考项目)
 - [许可证](#许可证)
@@ -43,16 +44,16 @@ PWM 输出 (TIM1):
   PA9  → PWMB_H (CH2)    PB14 → PWMB_L (CH2N)
   PA10 → PWMC_H (CH3)    PB15 → PWMC_L (CH3N)
 
-电流采样 (ADC1):
+电流采样 (ADC1/2):
   PA0 → CUR_A    PA1 → CUR_B    PA2 → CUR_C    PB1 → VBUS
 
 编码器 (SPI1):
   PA5 → SCK      PA6 → MISO     PA7 → MOSI
 
 通信:
-  PA11 → USB_DM  PA12 → USB_DP
-  PB8  → FDCAN_RX  PB9 → FDCAN_TX
-  PB6  → USART1_TX  PB7 → USART1_RX
+  PA11 → USB_DM    PA12 → USB_DP
+  PB8  → FDCAN_RX  PB9  → FDCAN_TX
+  PB6  → USART1_TX PB7  → USART1_RX
 
 LED: PC13
 ```
@@ -63,44 +64,88 @@ LED: PC13
 
 milFOC 采用**四层解耦架构**，严格隔离硬件抽象、核心算法、应用逻辑：
 
-```mermaid
-graph TB
-    subgraph APP["🎯 App 应用层"]
-        A1[robot.c 系统入口]
-        A2[cmd_task.c 指令调度]
-        A3[motor_task.c 实时中断]
-    end
-    subgraph MODULES["⚙️ Modules 功能模块"]
-        M1[PID 控制器]
-        M2[FOC 核心算法]
-        M3[MT6816 编码器]
-        M4[CAN 协议驱动]
-        M5[轨迹规划器]
-        M6[VOFA 示波器]
-    end
-    subgraph BSP["🔌 BSP 板级支持包"]
-        B1[DWT 高精度定时]
-        B2[ADC 注入组采样]
-        B3[CAN/FDCAN 驱动]
-        B4[USART 串口]
-        B5[Log 日志系统]
-        B6[Flash 存储]
-    end
-    subgraph HW["💻 Core HAL 硬件层"]
-        H1[STM32CubeMX HAL]
-        H2[CMSIS / Drivers]
-    end
-    APP --> MODULES --> BSP --> HW
+```
+┌──────────────────────────────────────────────────────────────┐
+│  🎯 App/          应用层                                      │
+│  robot.c       → 系统初始化入口 (RobotInit / RobotTask)       │
+│  cmd_task.c    → CAN 命令解析/调度 (~200Hz)                   │
+│  motor_task.c  → JEOC 中断回调 (20kHz 电流环)                 │
+│  robot_def.h   → CAN ID / 协议帧 / 命令枚举定义               │
+├──────────────────────────────────────────────────────────────┤
+│  ⚙️ Modules/      功能模块层                                   │
+│  motor/          → FOC 算法核心 (Clarke/Park/SVPWM/PID)       │
+│  encoder/        → MT6816 编码器 + PLL 速度估算               │
+│  controller/     → 抗饱和 PID 控制器                          │
+│  comm/           → CAN 协议解析/打包                          │
+│  daemon/         → 模块心跳守护                               │
+│  led/            → LED 状态指示                               │
+│  vofa/           → VOFA+ 数据示波器                           │
+│  algorithm/crc   → CRC-8/16 校验                              │
+│  general_def.h   → 全局常量/宏/内联函数                       │
+├──────────────────────────────────────────────────────────────┤
+│  🔌 BSP/          板级支持包                                   │
+│  bsp_adc.c     → ADC 注入组 + TIM1 同步触发                  │
+│  bsp_can.c     → FDCAN 收发/滤波/中断 (已验证)               │
+│  bsp_dwt.c     → DWT 高精度周期计数器 (ns 延时)              │
+│  bsp_usart.c   → USART DMA/IT 多实例                         │
+│  bsp_log.c     → 非阻塞分级日志                              │
+│  bsp_flash.c   → 内部 Flash 参数持久化                       │
+│  bsp_init.h    → BSP 统一初始化                               │
+├──────────────────────────────────────────────────────────────┤
+│  💻 Core/         CubeMX 生成 (禁止手动修改)                   │
+│  Core/Inc/      → HAL 头文件 (adc.h, tim.h, gpio.h, ...)     │
+│  Core/Src/      → HAL 源文件 (main.c, adc.c, tim.c, ...)     │
+│  Drivers/       → CMSIS + HAL 驱动库                          │
+│  Middlewares/   → ST USB 协议栈                               │
+└──────────────────────────────────────────────────────────────┘
 ```
 
-### 层级职责
+### 层级职责与规则
 
 | 层级 | 职责 | 依赖 | 禁止 |
 |------|------|------|------|
 | **Core/** | CubeMX 生成的 HAL 初始化代码 | CMSIS, HAL | ❌ 手动修改 |
-| **BSP/** | 板级外设驱动抽象 (DWT/ADC/CAN/USART/Log/Flash) | Core HAL | ❌ 包含业务逻辑 |
-| **Modules/** | 核心算法与控制模块 (FOC/PID/编码器/协议) | BSP, Core | ❌ 直接操作寄存器 |
+| **BSP/** | 板级外设驱动抽象 | Core HAL | ❌ 包含业务逻辑 |
+| **Modules/** | 核心算法与控制模块 | BSP, Core | ❌ 直接操作寄存器 |
 | **App/** | 应用层任务调度与系统集成 | Modules, BSP | ❌ 包含算法实现 |
+
+---
+
+## 📊 层级详解
+
+> 各层详细说明请参见对应子目录 README：
+
+| 层级 | README | 说明 |
+|------|--------|------|
+| BSP | [BSP/README.md](./BSP/README.md) | 每个 BSP 驱动文件的功能、API 接口、硬件映射 |
+| Modules | [Modules/README.md](./Modules/README.md) | 各模块的算法原理、数据结构、调用关系 |
+| App | [App/README.md](./App/README.md) | 系统初始化流程、任务调度、CAN 协议定义 |
+
+### 层级间的调用关系
+
+```
+App/robot.c
+├── BSP/bsp_init.h       → DWT 初始化
+├── BSP/bsp_log.c        → USART1 日志绑定
+├── BSP/bsp_adc.c        → ADC1 注入组配置
+├── Modules/motor/       → Foc_Pwm_Start / Foc_Pwm_LowSides
+├── Modules/comm/        → FDCANCommInit → BSP/bsp_can.c:bsp_can_init()
+├── Modules/led/         → RGB_DisplayColorById
+├── App/cmd_task.c       → RobotCMDInit / RobotCMDTask
+└── App/motor_task.c     → MotorTask (仅 JEOC ISR 上下文中)
+
+App/cmd_task.c
+├── Modules/comm/can_driver.c → FDCANCommGet / FDCANCommSend
+│   └── BSP/bsp_can.c         → fdcanx_send_data / rx_data1
+├── Modules/motor/bldc_motor.c → Foc_Pwm_LowSides (预充电/急停)
+├── Modules/motor/foc_motor.c  → MOTOR_DATA 全局状态
+└── Modules/encoder/           → ENCODER_DATA 速度/位置读取
+
+App/motor_task.c (ADC JEOC ISR, 最高优先级, <15µs)
+├── Modules/motor/foc_motor.c  → GetMotorADC1PhaseCurrent
+├── Modules/motor/bldc_motor.c → Clarke / Park / PID / InvPark / SVPWM / SetPwm
+└── Modules/encoder/           → GetMotor_Angle (PLL 更新)
+```
 
 ---
 
@@ -110,7 +155,7 @@ graph TB
 
 | 模式 | 枚举值 | 说明 |
 |------|--------|------|
-| `CONTROL_MODE_OPEN` | 速度开环 | V/F 控制，用于启动或调试 |
+| `CONTROL_MODE_OPEN` | 速度开环 | V/F 控制, 用于启动或调试 |
 | `CONTROL_MODE_TORQUE` | 力矩闭环 | dq 轴电流 PI 控制 |
 | `CONTROL_MODE_VELOCITY` | 速度闭环 | 速度环 → 电流环级联 |
 | `CONTROL_MODE_POSITION` | 位置闭环 | 位置环 → 速度环 → 电流环 |
@@ -121,7 +166,7 @@ graph TB
 
 | 保护类型 | 触发条件 | 动作 |
 |----------|----------|------|
-| 过流保护 | Iq > 1.5× 电流限幅 | 关闭 PWM，进入 GUARD 状态 |
+| 过流保护 | Iq > 1.5× 电流限幅 | 关闭 PWM, 进入 GUARD 状态 |
 | 过压保护 | Vbus > 1.2× 额定电压 | 关闭 PWM |
 | 欠压保护 | Vbus < 额定电压 / 1.5 | 关闭 PWM |
 | 过热保护 | NTC > 65°C (预留) | 关闭 PWM |
@@ -130,10 +175,10 @@ graph TB
 ### 核心算法
 
 - ✅ Clarke / Park / InvPark / SVPWM 全链路变换
-- ✅ 七段式 SVPWM + 中点注入 (bipolar→unipolar)
+- ✅ 七段式 SVPWM + 中点注入 (bipolar → unipolar)
 - ✅ 位置式 PID (抗积分饱和 + 输出限幅)
 - ✅ 软件 PLL 编码器速度估算 (2000 rad/s 带宽)
-- ✅ 梯形轨迹规划器
+- ✅ 梯形轨迹规划器 (加速 → 匀速 → 减速)
 - ✅ 三电阻下桥电流采样 + ADC 注入组同步触发
 - ✅ FD6288 自举电容预充电管理
 - 🚧 CORDIC 硬件加速 sin/cos (待迁移)
@@ -168,12 +213,7 @@ cmake --preset Debug
 cmake --build build/Debug
 
 # 烧录 (使用 ST-LINK / J-Link)
-# 方法 1: STM32CubeProgrammer
 STM32_Programmer_CLI -c port=SWD -w build/Debug/milFOC.elf -v
-
-# 方法 2: OpenOCD
-openocd -f interface/stlink.cfg -f target/stm32g4x.cfg \
-  -c "program build/Debug/milFOC.elf verify reset exit"
 ```
 
 ### CubeMX 配置要点
@@ -192,200 +232,254 @@ openocd -f interface/stlink.cfg -f target/stm32g4x.cfg \
 |------|---------------------|------|
 | ADC1 JEOC | 0/0 (最高) | 20kHz 电流环 FOC 计算 |
 | TIM1 Break | 0/1 | FD6288 硬件故障保护 |
-| TIM3 (或 TIM2) | 1/0 | 1kHz 速度环调度 |
+| TIM3/TIM2 | 1/0 | 1kHz 速度环调度 |
 | USART1 DMA | 3/0 | 日志非阻塞输出 |
 | FDCAN1 | 4/0 | CAN 通信 |
 | USB CDC | 5/0 | USB 虚拟串口 |
 
 ---
 
-## 📁 目录结构
+## 📁 完整目录树
 
 ```
 milFOC/
-├── Core/                       # STM32CubeMX 生成 (禁止手动修改)
-│   ├── Inc/                    # HAL 头文件 (adc.h, tim.h, gpio.h, ...)
-│   └── Src/                    # HAL 源文件 (main.c, adc.c, tim.c, ...)
+├── .gitignore                   # Git 忽略规则 (build/ 输出, IDE 配置)
+├── .github/agents/              # GitHub Copilot Agent 配置
+├── CMakeLists.txt               # 顶层 CMake 构建脚本 (自动扫描用户目录)
+├── CMakePresets.json            # CMake 预设 (Debug/Release)
+├── milFOC.ioc                   # STM32CubeMX 项目配置文件
+├── startup_stm32g431xx.s        # 启动汇编 (向量表, 堆栈)
+├── STM32G431XX_FLASH.ld         # 链接脚本 (FLASH/RAM 布局)
+├── README.md                    # 📖 本文件
 │
-├── Drivers/                    # STM32 官方驱动 (CMSIS + HAL)
+├── Core/                        # 💻 CubeMX 生成 — 禁止手动修改
+│   ├── Inc/                     # HAL 头文件
+│   │   ├── main.h               #   主头文件 (引脚定义, 句柄声明)
+│   │   ├── adc.h / tim.h / gpio.h
+│   │   ├── spi.h / fdcan.h / usart.h
+│   │   ├── cordic.h / crc.h / dma.h / rng.h
+│   │   ├── stm32g4xx_hal_conf.h #   HAL 模块使能配置
+│   │   └── stm32g4xx_it.h       #   中断服务程序声明
+│   └── Src/                     # HAL 源文件
+│       ├── main.c               #   main() 入口
+│       ├── adc.c / tim.c / gpio.c / spi.c / fdcan.c / usart.c
+│       ├── cordic.c / crc.c / dma.c / rng.c
+│       ├── stm32g4xx_hal_msp.c  #   外设 MSP 初始化
+│       ├── stm32g4xx_it.c       #   中断向量表入口
+│       ├── system_stm32g4xx.c   #   系统时钟配置
+│       ├── syscalls.c / sysmem.c
+│
+├── Drivers/                     # STM32 官方驱动库
 │   ├── CMSIS/
-│   └── STM32G4xx_HAL_Driver/
+│   │   ├── Include/             #   CMSIS Core (core_cm4.h, cmsis_gcc.h)
+│   │   └── Device/ST/STM32G4xx/ #   设备头文件 (stm32g431xx.h, system_)
+│   └── STM32G4xx_HAL_Driver/   #   HAL 驱动库 (hal_adc.c, hal_tim.c, ...)
 │
-├── BSP/                        # 🔌 板级支持包 — 硬件抽象层
-│   ├── bsp_dwt.c/h            # DWT 高精度周期计数器 (ns 级延时/性能剖析)
-│   ├── bsp_adc.c/h            # ADC 注入组配置, TIM1 触发同步采样
-│   ├── bsp_can.c/h            # CAN/FDCAN 多实例驱动 (🚧 演进中)
-│   ├── bsp_usart.c/h          # USART 多实例抽象 (DMA/IT 模式)
-│   ├── bsp_log.c/h            # 分级日志系统 (DEBUG/INFO/WARN/ERROR)
-│   ├── bsp_flash.c/h          # 内部 Flash 存储 (校准参数持久化)
-│   └── bsp_init.h             # BSP 统一初始化入口 (RobotInit 调用)
+├── Middlewares/                 # ST 中间件
+│   └── ST/
+│       └── STM32_USB_Device_Library/  # USB CDC 协议栈
 │
-├── Modules/                    # ⚙️ 功能模块层 — 核心算法与控制逻辑
-│   ├── general_def.h          # 全局通用定义 (数学常量/工具宏/内联函数)
+├── USB_Device/                  # USB 应用层 (CubeMX 生成)
+│   ├── App/
+│   │   ├── usb_device.c         #   USB 设备初始化
+│   │   ├── usbd_desc.c          #   设备描述符
+│   │   └── usbd_cdc_if.c        #   CDC 接口回调 (接收/发送)
+│   └── Target/
+│       └── usbd_conf.c          #   USB 配置 (内存, 端点)
+│
+├── BSP/                         # 🔌 板级支持包 — 详见 BSP/README.md
+│   ├── bsp_init.h               # BSP 统一初始化入口
+│   ├── bsp_dwt.c / .h           # DWT 周期计数器 (ns 级延时/性能剖析)
+│   ├── bsp_adc.c / .h           # ADC 注入组 + TIM1 同步触发
+│   ├── bsp_can.c / .h           # FDCAN 收发/滤波/中断 (已验证)
+│   ├── bsp_usart.c / .h         # USART DMA/IT 多实例抽象
+│   ├── bsp_log.c / .h           # 非阻塞分级日志 (DEBUG/INFO/WARN/ERROR)
+│   ├── bsp_flash.c / .h         # 内部 Flash 参数持久化
+│   └── README.md                # BSP 层详细文档
+│
+├── Modules/                     # ⚙️ 功能模块层 — 详见 Modules/README.md
+│   ├── general_def.h            # 全局数学常量 / 工具宏 / 数据类型转换
 │   ├── controller/
-│   │   └── pid.c/h            # 位置式/增量式 PID (抗积分饱和 + 输出限幅)
-│   ├── motor/                  # ★ FOC 电机控制核心 ★
-│   │   ├── bldc_motor.c/h     # FOC 数学核心 (Clarke/Park/InvPark/SVPWM)
-│   │   ├── foc_motor.c/h      # FOC 状态机, 多环级联调度, 故障保护
-│   │   ├── motor_adc.c/h      # ADC 原始值 → 实际电流/电压/温度映射
-│   │   └── trap_traj.c/h      # 梯形轨迹规划器 (PTP 点位运动)
+│   │   └── pid.c / .h           # 位置式 PID (抗饱和 + 输出限幅)
+│   ├── motor/                   # ★ FOC 核心 ★
+│   │   ├── bldc_motor.c / .h    # FOC 数学变换 (Clarke/Park/InvPark/SVPWM)
+│   │   ├── foc_motor.c / .h     # 电机状态机 / 多环级联 / 故障保护
+│   │   ├── motor_adc.c / .h     # ADC→物理量映射 / 偏置校准
+│   │   └── trap_traj.c / .h     # 梯形轨迹规划器
 │   ├── encoder/
-│   │   └── mt6816_encoder.c/h # MT6816 14-bit 绝对值编码器 + PLL 估算
+│   │   └── mt6816_encoder.c/.h  # MT6816 14-bit 绝对值编码器 + PLL
 │   ├── comm/
-│   │   └── can_driver.c/h     # CAN 协议层 (🚧 基于 bsp_can 多实例封装)
+│   │   └── can_driver.c / .h    # CAN 协议层 (命令帧解析 / 遥测打包)
 │   ├── daemon/
-│   │   └── daemon.c/h         # 模块心跳守护 (离线检测 + 异常回调)
+│   │   └── daemon.c / .h        # 模块心跳守护 (离线检测 + 回调)
 │   ├── led/
-│   │   └── led.c/h            # RGB LED 状态指示 (故障/运行/校准)
+│   │   └── led.c / .h           # RGB LED 状态指示
 │   ├── vofa/
-│   │   └── vofa.c/h           # VOFA+ JustFloat 实时数据流 (USB CDC)
-│   └── algorithm/
-│       └── crc/
-│           ├── crc8.c/h        # CRC-8 校验
-│           └── crc16.c/h       # CRC-16 (Modbus) 校验
+│   │   └── vofa.c / .h          # VOFA+ JustFloat 实时数据流 (USB CDC)
+│   ├── algorithm/
+│   │   └── crc/
+│   │       ├── crc8.c / .h      # CRC-8 校验 (预计算查找表)
+│   │       └── crc16.c / .h     # CRC-16 Modbus 校验
+│   └── README.md                # Modules 层详细文档
 │
-├── App/                        # 🎯 应用层 — 系统集成与任务调度
-│   ├── robot.c/h              # 系统初始化入口 (RobotInit/RobotTask)
-│   ├── robot_def.h            # 核心数据结构, CAN 协议帧, 命令枚举
-│   ├── cmd_task.c/h           # CAN/USB 指令解析与调度 (200Hz)
-│   └── motor_task.c/h         # ADC JEOC 中断回调 (20kHz 电流环)
+├── App/                         # 🎯 应用层 — 详见 App/README.md
+│   ├── robot.c / .h             # 系统初始化入口 (RobotInit / RobotTask)
+│   ├── robot_def.h              # 核心定义: CAN ID / 协议帧 / 命令枚举
+│   ├── cmd_task.c / .h          # CAN 指令解析与调度 (~200Hz)
+│   ├── motor_task.c / .h        # ADC JEOC 中断回调 (20kHz 电流环)
+│   └── README.md                # App 层详细文档
 │
-├── Resources/                  # 🧰 板级验证资源 (可直接使用的驱动)
-│   ├── general_def.h          # 早期通用定义 (Modules/general_def.h 的原始版本)
-│   ├── can/
-│   │   └── bsp_fdcan.c/h      # ★ 已验证可用的 CAN/FDCAN 驱动 (含 RX 中断, FD DLC)
-│   └── motor/                  # (预留) 电机测试资源
+├── cmake/                       # CMake 构建配置
+│   ├── gcc-arm-none-eabi.cmake  # ARM GCC 工具链配置
+│   ├── starm-clang.cmake        # ARM Clang 工具链 (备选)
+│   └── stm32cubemx/
+│       └── CMakeLists.txt       # 自动扫描 Core/Drivers/Middlewares 源文件
 │
-├── USB_Device/                 # USB CDC 虚拟串口 (CubeMX 生成)
-│   ├── App/                    # usb_device, usbd_cdc_if, usbd_desc
-│   └── Target/                 # usbd_conf
+├── Docs/                        # 📚 参考工程与学习资料
+│   ├── FalconFoc/               # FalconFoc 参考工程 (本项目架构原型)
+│   │   ├── APP/ / BSP/ / MODULES/ / Core/ / Drivers/
+│   │   └── learningMD/          #   架构分析 / FOC 流程 / 数据结构文档
+│   └── MotorConrol/             # ODrive C++ FOC 移植参考 (不参与编译)
+│       ├── foc.cpp / .hpp       #   FieldOrientedController 实现
+│       ├── controller.cpp/.hpp  #   位置/速度/力矩级联控制器
+│       ├── motor.cpp / .hpp     #   电机参数/校准/电流管理
+│       ├── encoder.cpp / .hpp   #   编码器抽象层
+│       ├── sensorless_estimator.* # 无感估算器 (SMO/EKF)
+│       ├── trapTraj.cpp / .hpp  #   梯形轨迹规划器
+│       ├── utils.cpp / .hpp     #   数学工具 (sin/cos/sincos 近似)
+│       └── low_level.cpp / .h   #   硬件抽象层
 │
-├── Middlewares/                # ST USB 协议栈 (STM32_USB_Device_Library)
-│
-├── Docs/                       # 📚 文档与参考工程
-│   ├── FalconFoc/              # ★ FalconFoc 参考工程 (本项目架构原型)
-│   │   ├── learningMD/         #   架构分析, FOC 流程, 数据结构文档
-│   │   ├── APP/                #   应用层参考
-│   │   ├── BSP/                #   板级支持包参考
-│   │   └── MODULES/            #   功能模块参考
-│   └── MotorConrol/            # ODrive C++ FOC 移植参考 (编译未启用)
-│
-├── cmake/                      # CMake 工具链配置
-│   ├── gcc-arm-none-eabi.cmake # ARM GCC 工具链
-│   ├── starm-clang.cmake       # ARM Clang 工具链 (备选)
-│   └── stm32cubemx/            # CubeMX CMake 集成
-│       └── CMakeLists.txt      #   自动扫描 Core/Drivers/Middlewares
-│
-├── milFOC.ioc                  # STM32CubeMX 项目配置文件
-├── CMakeLists.txt              # 顶层 CMake 构建脚本
-├── CMakePresets.json           # CMake 预设 (Debug/Release)
-├── startup_stm32g431xx.s       # 启动文件 (Reset_Handler, 中断向量表)
-├── STM32G431XX_FLASH.ld        # 链接脚本 (Flash/RAM 布局)
-├── .gitignore                  # Git 忽略规则
-└── README.md                   # 本文件
-```
-
-> **说明**: `Resources/can/bsp_fdcan.c/h` 是当前已验证可用的 CAN 驱动 (已在 `Core/Src/main.c` 中调用验证)。`BSP/bsp_can.c/h` + `Modules/comm/can_driver.c/h` 是基于 FalconFoc 架构的演进版本，支持多实例注册和超时管理，目前仍在集成中。
-└── README.md
+└── build/                       # 构建输出 (已 gitignore)
+    └── Debug/
+        ├── milFOC.elf           #   可执行文件
+        ├── milFOC.map           #   内存映射
+        ├── compile_commands.json#   编译数据库
+        └── CMakeFiles/          #   CMake 构建缓存
 ```
 
 ---
 
-## 🔄 控制环路
+## 🔄 FOC 数据流与时序
 
-### 多速率级联控制架构
+### 单次电流环执行流程 (20kHz)
 
 ```
-位置环 (100Hz)
-  │  PID_Calc(&PosPID)  →  vel_setpoint
-  ▼
-速度环 (1kHz)
-  │  PID_Calc(&VelPID)  →  torque_setpoint
-  ▼
-电流环 (20kHz) — 最高优先级, ADC JEOC 中断触发
-  │  Clarke → Park → PI(d/q) → InvPark → SVPWM → TIM1_CCRx
-  ▼
-PWM 输出 → 三相逆变器 → 电机
+TIM1 计数器溢出 (中心对齐模式, 周期 50µs)
+        │
+        ▼
+TIM1 CH4 OC 触发 ADC1 注入组
+  → ADC1 同步采样: JDR1=CUR_C, JDR2=CUR_B, JDR3=CUR_A, JDR4=VBUS
+        │
+        ▼  (~2µs ADC 转换时间)
+ADC JEOC 中断 (优先级 0/0, 最高)
   │
-  └── ADC 注入组同步采样 → 电流/电压反馈
+  └── motor_task.c:MotorTask()  ─────── 总执行时间 < 15µs ───────
+        │
+        ├─ 1. GetMotorADC1PhaseCurrent()
+        │     读取 ADC1->JDR3/2/1 → Ia/Ib/Ic [A]
+        │     读取 ADC1->JDR4 → Vbus [V]
+        │
+        ├─ 2. Clarke(Ia,Ib,Ic) → Iα, Iβ
+        │     Iα = Ia
+        │     Iβ = (Ib - Ic) / √3
+        │
+        ├─ 3. GetMotor_Angle() → θ_e, ω_m
+        │     SPI 读 MT6816 14-bit 角度 → LUT 非线性校正
+        │     → PLL 跟踪 → pos_estimate_, vel_estimate_, phase_
+        │
+        ├─ 4. Park(Iα,Iβ, θ_e) → Id, Iq
+        │     Id = Iα·cosθ + Iβ·sinθ
+        │     Iq = -Iα·sinθ + Iβ·cosθ
+        │
+        ├─ 5. PID(Id_ref-Id) → Vd
+        │     PID(Iq_ref-Iq) → Vq
+        │     (带积分抗饱和 + 输出限幅)
+        │
+        ├─ 6. InvPark(Vd,Vq, θ_e) → Vα, Vβ
+        │     Vα = Vd·cosθ - Vq·sinθ
+        │     Vβ = Vd·sinθ + Vq·cosθ
+        │
+        ├─ 7. Svpwm_Midpoint(Vα,Vβ) → dtc_a, dtc_b, dtc_c
+        │     扇区判定 → 矢量时间 → 三相占空比 [0~1] + 0.5 中点偏置
+        │
+        └─ 8. SetPwm(dtc_a,b,c) → TIM1->CCR1/2/3
+              直接写寄存器 (最小延迟)
 ```
 
-### FOC 数据流 (单周期, 50µs)
+### 多环级联分频
 
 ```
-ADC JDR 寄存器
-  → GetMotorADC1PhaseCurrent()   [i_a, i_b, i_c, vbus]
-  → GetMotor_Angle()             [encoder PLL update, phase_]
-  → Clarke()                     [i_alpha, i_beta]
-  → Park()                       [i_d, i_q]
-  → PID_Calc(IqPID)              [v_q]
-  → PID_Calc(IdPID)              [v_d]
-  → Inv_Park()                   [v_alpha, v_beta]
-  → Svpwm_Midpoint()             [dtc_a, dtc_b, dtc_c]
-  → SetPwm()                     [TIM1->CCR1/CCR2/CCR3]
+每 1 次 ADC JEOC    → 电流环 (20kHz)
+每 20 次 ADC JEOC   → 速度环 (1kHz)   — VelPID 更新 Iq_setpoint
+每 200 次 ADC JEOC  → 位置环 (100Hz)  — PosPID 更新 Vel_setpoint + 梯形轨迹步进
+```
+
+### 电机状态机
+
+```
+IDLE ──(校准完成或跳过)──→ DETECTING
+                              │
+                     ┌───────[自动校准]────────┐
+                     │  CURRENT_CALIBRATING     │  ADC 偏置采集
+                     │  → RSLS_CALIBRATING      │  电阻/电感辨识
+                     │  → FLUX_CALIBRATING      │  磁链/极对数辨识
+                     │  → ENCODER_CALIBRATING   │  编码器偏移校准
+                     │  → REPORT_OFFSET_LUT     │  非线性 LUT 生成
+                     └──────────┬───────────────┘
+                                ▼
+                             RUNNING ◄──────── 正常 FOC 运行
+                                │
+                     ┌─────────┴─────────┐
+                     ▼                   ▼
+              过流/过压/欠压/过热     用户 STOP 指令
+                     │                   │
+                     └────────┬──────────┘
+                              ▼
+                            GUARD  ────  PWM 关闭, 等待清除
 ```
 
 ---
 
-## 📖 开发指南
+## 👨‍💻 开发指南
 
-### 添加新模块
+### 分支策略
 
-1. 在对应层级创建子目录和源文件
-2. 在 CMakeLists.txt 中无需手动添加 — 构建系统自动扫描 `USER_FOLDERS`
-3. 模块初始化在 `robot.c` 的 `RobotInit()` 中调用
-4. 周期任务在 `RobotTask()` 中调度
+- `main` — 稳定分支，必须编译通过
+- `dev/*` — 功能开发分支
+- `test/*` — 板级测试分支
 
-### 日志规范
+> ⚠️ 请在非 main 分支上进行修改和测试，验证通过后再合并！
 
-```c
-// 用例 (禁止在 JEOC 中断中使用!)
-LOGDEBUG("[FOC] Current: Id=%.3f, Iq=%.3f", i_d, i_q);
-LOGINFO("[MOTOR] State: IDLE -> RUNNING");
-LOGWARNING("[ADC] Phase-A current nearing limit: %.2fA", ia);
-LOGERROR("[DRV] Hardware over-current fault! PWM locked");
+### 编码规范
+
+1. **BSP 层** — 仅封装硬件操作，函数名以 `bsp_` 或硬件名开头
+2. **Modules 层** — 实现纯算法和控制逻辑，通过 BSP 接口访问硬件
+3. **Core 层** — CubeMX 生成，**禁止手动修改**
+4. **中断函数** — 仅放必要逻辑，保持 < 15µs 执行时间
+5. **日志使用** — ISR 中禁止使用 `LOG_*` 宏；使用 `LOG_PROTO` 格式化
+
+### Git 提交规范
+
 ```
+<type>: <subject>
 
-日志采用 DMA 非阻塞发送，**严禁在 20kHz JEOC 中断中调用**。
+<body> — 变更原因、影响范围
 
-### 调试工具
-
-- **VOFA+**: 实时波形显示 (JustFloat 协议, USB CDC)
-- **CAN 抓包**: 使用 PCAN-View 或 BusMaster
-- **SWV**: Serial Wire Viewer 实时 printf
-- **DWT**: 微秒级代码执行时间剖析
-
-### 分支管理
-
-```bash
-# 主分支保持稳定
-git checkout main
-
-# 创建测试分支进行开发
-git checkout -b dev/your-feature
-
-# 测试通过后合并
-git checkout main
-git merge dev/your-feature
+类型: feat(功能) / fix(修复) / refactor(重构) / docs(文档) / chore(杂项)
+示例: fix: 修复 bsp_can.c 中 can_filter_init 隐式声明警告
 ```
 
 ---
 
 ## 📚 参考项目
 
-| 项目 | 说明 | 位置 |
+| 项目 | 路径 | 用途 |
 |------|------|------|
-| **FalconFoc** | 本项目的主要架构参考，基于 STM32G431 的完整 FOC 工程 | `Docs/FalconFoc/` |
-| **ODrive** | 高性能开源 FOC 伺服驱动器 (C++ 移植参考) | `Docs/MotorConrol/` |
-| **SimpleFOC** | Arduino 生态的简易 FOC 库 | [github.com/simplefoc](https://github.com/simplefoc/Arduino-FOC) |
-| **Moteus** | 高性能无刷电机控制器 | [github.com/mjbots/moteus](https://github.com/mjbots/moteus) |
+| **FalconFoc** | `Docs/FalconFoc/` | 本项目架构原型 (基于 STM32G431 的完整 FOC 工程) |
+| **ODrive** | `Docs/MotorConrol/` | C++ FOC 移植参考 (算法分析与架构借鉴, 不参与编译) |
 
 ---
 
 ## 📄 许可证
 
-本项目采用 **MIT** 许可证。详见 [LICENSE](LICENSE) 文件。
-
----
-
-> **milFOC** — *Built for Performance, Designed for Control.*
+本项目采用 MIT 许可证。详见 [LICENSE](./LICENSE) 文件。

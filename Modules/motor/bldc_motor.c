@@ -13,7 +13,7 @@
  */
 
 #include "bldc_motor.h"
-#include "arm_math.h"
+#include <math.h>
 
 /* ======================== Global FOC Data Instance ========================= */
 FOC_DATA foc_data = {
@@ -111,12 +111,12 @@ void SetPwm(FOC_DATA *foc)
 
 /**
  * @brief  Compute sin/cos of current theta
- * @note   Uses CMSIS-DSP for now. TODO: Use CORDIC accelerator.
+ * @note   Uses standard math library. TODO: Migrate to CORDIC accelerator.
  */
 void Sin_Cos_Val(FOC_DATA *foc)
 {
-    foc->sin_val = arm_sin_f32(foc->theta);
-    foc->cos_val = arm_cos_f32(foc->theta);
+    foc->sin_val = sinf(foc->theta);
+    foc->cos_val = cosf(foc->theta);
 }
 
 /* ======================== FOC Core Transforms ============================== */

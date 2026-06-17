@@ -22,7 +22,9 @@
 typedef unsigned char bool_t;
 
 /* =========================== Math Constants =============================== */
+#ifndef M_PI
 #define M_PI        (3.14159265358979323846f)
+#endif
 #define M_2PI       (6.28318530717958647692f)
 #define M_3PI_2     (4.71238898038469f)
 #define _SQRT3      (1.7320508075688772935f)

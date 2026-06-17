@@ -8,10 +8,6 @@ build/
 *.map
 *.list
 
-# IDE files
-.idea/
-.mxproject
-*.mxproject
 
 # VS Code
 .vscode/settings.json
@@ -27,13 +23,18 @@ desktop.ini
 *.swp
 *.swo
 
+# IDE files
+.idea/
+.mxproject
+*.mxproject
+
 # CubeMX generated (tracked in Core/)
 # Keep .ioc file tracked
 
-# Dependencies
-Drivers/
-Middlewares/
 
 # Temp files
 tmp/
 temp/
+
+# reference
+Docs/

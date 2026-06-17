@@ -16,6 +16,7 @@
 
 #include "foc_motor.h"
 #include "bsp_dwt.h"
+#include "bsp_adc.h"
 #include "bsp_log.h"
 #include "led.h"
 #include "trap_traj.h"

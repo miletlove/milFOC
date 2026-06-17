@@ -31,7 +31,6 @@ void traj_plan(tTraj *traj, float start_pos, float end_pos,
     traj->t   = 0.0f;
 
     float displacement = end_pos - start_pos;
-    float dir = SIGN(displacement);
     float abs_disp = ABS(displacement);
 
     /* Ensure positive parameters */

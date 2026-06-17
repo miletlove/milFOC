@@ -2,78 +2,59 @@
  ******************************************************************************
  * @file    bsp_can.h
  * @author  milFOC Team
- * @brief   CAN/FDCAN Board Support Package for STM32G431.
- *          Supports multi-instance FDCAN registration with timeout management.
+ * @brief   FDCAN Board Support Package for STM32G431.
+ *          Provides low-level CAN send/receive/init using HAL FDCAN driver.
  *
  * @note    Hardware: FDCAN1 on PB8 (RX) / PB9 (TX)
- *          Max registered instances: 6
+ *          Tested with standard 11-bit ID, classic CAN (non-FD) frames, 8-byte payload.
  ******************************************************************************
  */
 
 #ifndef BSP_CAN_H
 #define BSP_CAN_H
 
-#include "general_def.h"
 #include "main.h"
 #include "fdcan.h"
-
-/* CAN configuration constants */
-#define FDCAN_MX_REGISTER_CNT 6   /* Max number of CAN instances */
-#define DEVICE_CAN_CNT 1          /* Physical CAN peripheral count on this board */
-
-/**
- * @brief FDCAN instance structure (ownership model)
- */
-typedef struct fdcaninstance
-{
-    FDCAN_HandleTypeDef *fdcan_handle;  /* CAN peripheral handle */
-    FDCAN_TxHeaderTypeDef txconf;       /* TX header configuration */
-    uint32_t tx_id;                     /* TX message ID */
-    uint32_t tx_mailbox;                /* TX mailbox slot */
-    uint8_t tx_buff[8];                 /* TX buffer (max 8 bytes) */
-    uint8_t rx_buff[8];                 /* RX buffer (max 8 bytes) */
-    uint32_t rx_id;                     /* RX filter ID */
-    uint8_t rx_len;                     /* Received data length */
-
-    /* Module callback on received data */
-    void (*fdcan_module_callback)(struct fdcaninstance *);
-    void *id;                           /* Owning module pointer (cast to void*) */
-} FDCANInstance;
-
-/**
- * @brief FDCAN instance initialization configuration
- */
-typedef struct
-{
-    FDCAN_HandleTypeDef *fdcan_handle;
-    uint32_t tx_id;
-    uint32_t rx_id;
-    void (*fdcan_module_callback)(FDCANInstance *);
-    void *id;                           /* Owning module pointer */
-} FDCAN_Init_Config_s;
+#include "stdint.h"
 
 /* --- Public API --- */
 
 /**
- * @brief  Register (initialize) a CAN instance for a module
- * @param  config: pointer to init configuration
- * @return Pointer to the registered FDCANInstance
+ * @brief  Initialize CAN peripheral: configure filter, start, enable RX interrupt.
  */
-FDCANInstance *FDCANRegister(FDCAN_Init_Config_s *config);
+void bsp_can_init(void);
 
 /**
- * @brief  Set TX data length code for a CAN instance
- * @param  _instance: target CAN instance
- * @param  length: data length (0-8 bytes)
+ * @brief  Configure FDCAN filter (mask mode, accept all standard IDs to FIFO0).
  */
-void FDCANSetDLC(FDCANInstance *_instance, uint8_t length);
+void can_filter_init(void);
 
 /**
- * @brief  Transmit message via CAN instance
- * @param  _instance: target CAN instance (write to tx_buff before calling)
- * @param  timeout: transmission timeout in milliseconds
- * @return 0 on success, non-zero on failure
+ * @brief  Send a CAN data frame.
+ * @param  hfdcan : FDCAN handle pointer
+ * @param  id     : 11-bit standard CAN ID
+ * @param  data   : pointer to payload data
+ * @param  len    : payload length (1-8 bytes)
+ * @return 0 on success, 1 on failure
  */
-uint8_t FDCANTransmit(FDCANInstance *_instance, float timeout);
+uint8_t fdcanx_send_data(FDCAN_HandleTypeDef *hfdcan, uint16_t id, uint8_t *data, uint32_t len);
+
+/**
+ * @brief  Receive a CAN data frame from FIFO0.
+ * @param  hfdcan : FDCAN handle pointer
+ * @param  rec_id : pointer to store received CAN ID
+ * @param  buf    : buffer to store received payload
+ * @return received data length (bytes), 0 if no message
+ */
+uint8_t fdcanx_receive(FDCAN_HandleTypeDef *hfdcan, uint16_t *rec_id, uint8_t *buf);
+
+/**
+ * @brief  FDCAN1 RX callback (called from HAL_FDCAN_RxFifo0Callback).
+ */
+void fdcan1_rx_callback(void);
+
+/* --- Global RX buffer (read by upper layer) --- */
+extern uint8_t rx_data1[8];
+extern uint16_t rec_id1;
 
 #endif /* BSP_CAN_H */

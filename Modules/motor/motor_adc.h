@@ -21,7 +21,7 @@
 /**
  * @brief Current measurement data structure
  */
-typedef struct
+typedef struct CURRENT_DATA
 {
     ADC_HandleTypeDef *hadc;        /* ADC handle (hadc1) */
 

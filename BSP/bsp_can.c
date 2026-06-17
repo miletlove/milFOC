@@ -2,107 +2,128 @@
  ******************************************************************************
  * @file    bsp_can.c
  * @author  milFOC Team
- * @brief   CAN/FDCAN BSP implementation for STM32G431.
- *          Provides multi-instance CAN bus management.
+ * @brief   FDCAN BSP implementation for STM32G431.
+ *          Provides low-level CAN send/receive/init using HAL FDCAN driver.
  *
- * @note    Call FDCANRegister() to obtain a CAN instance before using.
- *          This file is adapted from FalconFoc's BSP layer for milFOC hardware.
+ * @note    Tested with: FDCAN1, standard 11-bit ID, classic CAN, 8-byte payload.
+ *          RX callback copies data to global rx_data1[8] for upper layer.
  ******************************************************************************
  */
 
 #include "bsp_can.h"
-#include "bsp_dwt.h"
-#include "bsp_log.h"
 #include "string.h"
 
-/* Registered CAN instance pool */
-static FDCANInstance *fdcan_instance[FDCAN_MX_REGISTER_CNT] = {NULL};
-static uint8_t idx;
+/* Global RX buffer (read by can_driver / upper layer) */
+uint8_t rx_data1[8] = {0};
+uint16_t rec_id1;
 
 /**
- * @brief  Register a FDCAN instance for a module
+ * @brief  Initialize FDCAN1: filter, start, enable RX FIFO0 interrupt.
  */
-FDCANInstance *FDCANRegister(FDCAN_Init_Config_s *config)
+void bsp_can_init(void)
 {
-    if (idx >= FDCAN_MX_REGISTER_CNT)
+    can_filter_init();
+    if (HAL_FDCAN_Start(&hfdcan1) != HAL_OK)
     {
-        LOGERROR("[CAN] Max CAN instances reached (%d)", FDCAN_MX_REGISTER_CNT);
-        return NULL;
+        Error_Handler();
     }
-
-    FDCANInstance *ins = (FDCANInstance *)malloc(sizeof(FDCANInstance));
-    memset(ins, 0, sizeof(FDCANInstance));
-
-    ins->fdcan_handle          = config->fdcan_handle;
-    ins->tx_id                 = config->tx_id;
-    ins->rx_id                 = config->rx_id;
-    ins->fdcan_module_callback = config->fdcan_module_callback;
-    ins->id                    = config->id;
-
-    /* Configure TX header defaults */
-    ins->txconf.Identifier          = config->tx_id;
-    ins->txconf.IdType              = FDCAN_STANDARD_ID;
-    ins->txconf.TxFrameType         = FDCAN_DATA_FRAME;
-    ins->txconf.DataLength          = FDCAN_DLC_BYTES_8;
-    ins->txconf.ErrorStateIndicator = FDCAN_ESI_ACTIVE;
-    ins->txconf.BitRateSwitch       = FDCAN_BRS_OFF;
-    ins->txconf.FDFormat            = FDCAN_CLASSIC_CAN;
-    ins->txconf.TxEventFifoControl  = FDCAN_NO_TX_EVENTS;
-    ins->txconf.MessageMarker       = 0;
-
-    /* Start CAN peripheral if not already started */
-    HAL_FDCAN_Start(ins->fdcan_handle);
-
-    fdcan_instance[idx++] = ins;
-    LOGINFO("[CAN] Instance registered, tx_id=0x%03X, rx_id=0x%03X", config->tx_id, config->rx_id);
-    return ins;
-}
-
-/**
- * @brief  Set TX data length code
- */
-void FDCANSetDLC(FDCANInstance *_instance, uint8_t length)
-{
-    if (length > 8) length = 8;
-    switch (length)
+    if (HAL_FDCAN_ActivateNotification(&hfdcan1, FDCAN_IT_RX_FIFO0_NEW_MESSAGE, 0) != HAL_OK)
     {
-        case 0:  _instance->txconf.DataLength = FDCAN_DLC_BYTES_0;  break;
-        case 1:  _instance->txconf.DataLength = FDCAN_DLC_BYTES_1;  break;
-        case 2:  _instance->txconf.DataLength = FDCAN_DLC_BYTES_2;  break;
-        case 3:  _instance->txconf.DataLength = FDCAN_DLC_BYTES_3;  break;
-        case 4:  _instance->txconf.DataLength = FDCAN_DLC_BYTES_4;  break;
-        case 5:  _instance->txconf.DataLength = FDCAN_DLC_BYTES_5;  break;
-        case 6:  _instance->txconf.DataLength = FDCAN_DLC_BYTES_6;  break;
-        case 7:  _instance->txconf.DataLength = FDCAN_DLC_BYTES_7;  break;
-        case 8:
-        default: _instance->txconf.DataLength = FDCAN_DLC_BYTES_8;  break;
+        Error_Handler();
     }
 }
 
 /**
- * @brief  Transmit a CAN message with timeout
+ * @brief  Configure FDCAN filter: mask mode, pass all standard IDs to FIFO0.
  */
-uint8_t FDCANTransmit(FDCANInstance *_instance, float timeout)
+void can_filter_init(void)
 {
-    uint32_t start = DWT->CYCCNT;
-    uint32_t tick  = HAL_GetTick();
+    FDCAN_FilterTypeDef fdcan_filter;
 
-    while (HAL_FDCAN_GetTxFifoFreeLevel(_instance->fdcan_handle) == 0)
-    {
-        if ((HAL_GetTick() - tick) > (uint32_t)(timeout * 1000))
-        {
-            LOGWARNING("[CAN] TX timeout for tx_id=0x%03X", _instance->tx_id);
-            return 1;
-        }
-    }
+    fdcan_filter.IdType       = FDCAN_STANDARD_ID;
+    fdcan_filter.FilterIndex  = 0;
+    fdcan_filter.FilterType   = FDCAN_FILTER_MASK;
+    fdcan_filter.FilterConfig = FDCAN_FILTER_TO_RXFIFO0;
+    fdcan_filter.FilterID1    = 0x00;
+    fdcan_filter.FilterID2    = 0x00;
 
-    if (HAL_FDCAN_AddMessageToTxFifoQ(_instance->fdcan_handle,
-                                       &_instance->txconf,
-                                       _instance->tx_buff) != HAL_OK)
-    {
-        LOGERROR("[CAN] TX failed for tx_id=0x%03X", _instance->tx_id);
-        return 2;
-    }
+    HAL_FDCAN_ConfigFilter(&hfdcan1, &fdcan_filter);
+}
 
+/**
+ * @brief  Send a CAN data frame via FIFO queue.
+ * @param  hfdcan : FDCAN handle
+ * @param  id     : 11-bit standard ID
+ * @param  data   : payload pointer
+ * @param  len    : payload length (<= 8 for classic CAN)
+ * @return 0 = success, 1 = failure
+ */
+uint8_t fdcanx_send_data(FDCAN_HandleTypeDef *hfdcan, uint16_t id, uint8_t *data, uint32_t len)
+{
+    FDCAN_TxHeaderTypeDef pTxHeader;
+
+    pTxHeader.Identifier           = id;
+    pTxHeader.IdType               = FDCAN_STANDARD_ID;
+    pTxHeader.TxFrameType          = FDCAN_DATA_FRAME;
+    pTxHeader.DataLength           = (len <= 8) ? len : 8;
+    pTxHeader.ErrorStateIndicator  = FDCAN_ESI_ACTIVE;
+    pTxHeader.BitRateSwitch        = FDCAN_BRS_OFF;
+    pTxHeader.FDFormat             = FDCAN_CLASSIC_CAN;
+    pTxHeader.TxEventFifoControl   = FDCAN_NO_TX_EVENTS;
+    pTxHeader.MessageMarker        = 0;
+
+    if (HAL_FDCAN_AddMessageToTxFifoQ(hfdcan, &pTxHeader, data) != HAL_OK)
+        return 1;
     return 0;
+}
+
+/**
+ * @brief  Receive a CAN data frame from RX FIFO0.
+ * @param  hfdcan : FDCAN handle
+ * @param  rec_id : out - received CAN ID
+ * @param  buf    : out - received payload
+ * @return received data length (bytes), 0 if no message
+ */
+uint8_t fdcanx_receive(FDCAN_HandleTypeDef *hfdcan, uint16_t *rec_id, uint8_t *buf)
+{
+    FDCAN_RxHeaderTypeDef pRxHeader;
+    uint8_t len;
+
+    if (HAL_FDCAN_GetRxMessage(hfdcan, FDCAN_RX_FIFO0, &pRxHeader, buf) == HAL_OK)
+    {
+        *rec_id = pRxHeader.Identifier;
+
+        /* Map DLC to byte length */
+        if      (pRxHeader.DataLength <= FDCAN_DLC_BYTES_8)   len = 8;
+        else if (pRxHeader.DataLength <= FDCAN_DLC_BYTES_12)  len = 12;
+        else if (pRxHeader.DataLength <= FDCAN_DLC_BYTES_16)  len = 16;
+        else if (pRxHeader.DataLength <= FDCAN_DLC_BYTES_20)  len = 20;
+        else if (pRxHeader.DataLength <= FDCAN_DLC_BYTES_24)  len = 24;
+        else if (pRxHeader.DataLength <= FDCAN_DLC_BYTES_32)  len = 32;
+        else if (pRxHeader.DataLength <= FDCAN_DLC_BYTES_48)  len = 48;
+        else                                                   len = 64;
+
+        return len;
+    }
+    return 0;
+}
+
+/**
+ * @brief  FDCAN1 RX callback - called from HAL_FDCAN_RxFifo0Callback ISR.
+ */
+void fdcan1_rx_callback(void)
+{
+    fdcanx_receive(&hfdcan1, &rec_id1, rx_data1);
+}
+
+/**
+ * @brief  HAL FDCAN RX FIFO0 interrupt callback (overrides weak function).
+ */
+void HAL_FDCAN_RxFifo0Callback(FDCAN_HandleTypeDef *hfdcan, uint32_t RxFifo0ITs)
+{
+    (void)RxFifo0ITs;
+    if (hfdcan == &hfdcan1)
+    {
+        fdcan1_rx_callback();
+    }
 }

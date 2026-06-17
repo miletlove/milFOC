@@ -42,6 +42,7 @@ void LOG_PROTO(const char *fmt, LOG_LEVEL level, const char *file,
     va_start(args, func);
     vsnprintf(tmp, sizeof(tmp) - 1, fmt, args);
     va_end(args);
+    tmp[sizeof(tmp) - 64] = '\0'; /* Ensure room for prefix in buf */
 
     switch (level)
     {

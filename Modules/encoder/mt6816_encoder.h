@@ -65,7 +65,7 @@ typedef enum
  *   - vel_estimate_: mechanical velocity [turn/s]
  *   - pos_estimate_: accumulated position [turn]
  */
-typedef struct
+typedef struct ENCODER_DATA
 {
     SPI_HandleTypeDef *hspi;
     GPIO_TypeDef *CS_Port;

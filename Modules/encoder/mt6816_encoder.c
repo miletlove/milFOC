@@ -16,6 +16,7 @@
  */
 
 #include "mt6816_encoder.h"
+#include "bldc_motor.h"
 #include "bsp_dwt.h"
 
 /* ======================== Global Encoder Instance ========================== */

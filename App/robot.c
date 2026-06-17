@@ -17,6 +17,7 @@
 #include "robot_def.h"
 #include "cmd_task.h"
 #include "motor_task.h"
+#include "led.h"
 
 /**
  * @brief  Global robot/motor initialization
