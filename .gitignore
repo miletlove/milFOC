@@ -1,0 +1,39 @@
+# Build output
+build/
+*.o
+*.obj
+*.elf
+*.hex
+*.bin
+*.map
+*.list
+
+# IDE files
+.idea/
+.mxproject
+*.mxproject
+
+# VS Code
+.vscode/settings.json
+.vscode/launch.json
+
+# OS files
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Debug
+*.log
+*.swp
+*.swo
+
+# CubeMX generated (tracked in Core/)
+# Keep .ioc file tracked
+
+# Dependencies
+Drivers/
+Middlewares/
+
+# Temp files
+tmp/
+temp/
