@@ -33,7 +33,7 @@
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
 #include "usbd_cdc_if.h"
-#include "bsp_fdcan.h"
+#include "can_test.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -111,8 +111,7 @@ int main(void)
   /* USER CODE BEGIN 2 */
   HAL_TIM_Base_Start_IT(&htim1);
   HAL_Delay(50);
-  bsp_can_init();
-  can_filter_init();
+  CAN_Test_Init();
   /* USER CODE END 2 */
 
   /* Infinite loop */
@@ -122,11 +121,7 @@ int main(void)
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
-    if(fdcanx_send_data(&hfdcan1, 0x013, TxData, 8)==0)
-    {
-        // 发送成功（可选：翻转 LED 指示发送状态）
-        //HAL_GPIO_TogglePin(LED_GPIO_Port, LED_Pin);
-    }
+    CAN_Test_Task();
     HAL_Delay(500);
 
   }
