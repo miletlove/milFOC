@@ -20,34 +20,48 @@
 #include "foc_motor.h"
 #include "bldc_motor.h"
 #include "mt6816_encoder.h"
+#include "usbd_cdc_if.h"
 #include "string.h"
 
 /* USB CDC transmit buffer */
 static uint8_t vofa_tx_buf[128];
+static uint16_t vofa_buf_idx = 0;
 
 void vofa_start(void)
 {
     memset(vofa_tx_buf, 0, sizeof(vofa_tx_buf));
+    vofa_buf_idx = 0;
 }
 
 void vofa_send_data(uint8_t num, float data)
 {
     (void)num;
-    /* TODO: Implement USB CDC send:
-     * CDC_Transmit_FS((uint8_t *)&data, 4);
-     */
-    (void)data;
+    if (vofa_buf_idx + 4 > sizeof(vofa_tx_buf))
+    {
+        /* Buffer full — flush now */
+        CDC_Transmit_FS(vofa_tx_buf, vofa_buf_idx);
+        vofa_buf_idx = 0;
+    }
+    memcpy(vofa_tx_buf + vofa_buf_idx, &data, 4);
+    vofa_buf_idx += 4;
 }
 
 void vofa_sendframetail(void)
 {
     float tail = 0.0f;
-    /* Set tail marker bytes for VOFA JustFloat protocol */
     ((uint8_t *)&tail)[3] = 0x7F;
     ((uint8_t *)&tail)[2] = 0x80;
     ((uint8_t *)&tail)[1] = 0x00;
     ((uint8_t *)&tail)[0] = 0x00;
-    /* TODO: CDC_Transmit_FS((uint8_t *)&tail, 4); */
+
+    /* Append tail and flush frame */
+    if (vofa_buf_idx + 4 <= sizeof(vofa_tx_buf))
+    {
+        memcpy(vofa_tx_buf + vofa_buf_idx, &tail, 4);
+        vofa_buf_idx += 4;
+    }
+    CDC_Transmit_FS(vofa_tx_buf, vofa_buf_idx);
+    vofa_buf_idx = 0;
 }
 
 /**

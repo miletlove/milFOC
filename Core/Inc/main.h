@@ -67,8 +67,26 @@ void Error_Handler(void);
 #define CUR_C_GPIO_Port GPIOA
 #define VBUS_Pin GPIO_PIN_1
 #define VBUS_GPIO_Port GPIOB
+#define SPI1_CS_Pin GPIO_PIN_12
+#define SPI1_CS_GPIO_Port GPIOB
 
 /* USER CODE BEGIN Private defines */
+
+/* =================== MCPWM (Motor Control PWM) Macros ==================== */
+/*
+ * These define TIM1 timing for center-aligned 20kHz FOC PWM.
+ * SYSCLK = 168MHz, APB2 = 168MHz (timer clock = APB2 * 2 = 168MHz).
+ *
+ * PWM Frequency  = 168MHz / 2 / PERIOD  = 20kHz  (center-aligned halves the rate)
+ * DeadTime       = 20 clocks ≈ 119ns (FD6288 adds 450ns = ~570ns total)
+ * ADC Trigger CH4 = PERIOD - 10 = center of low-side conduction zone
+ */
+#define MCPWM_CLOCK_HZ         168000000UL
+#define MCPWM_FREQ             20000U
+#define MCPWM_PERIOD_CLOCKS    (MCPWM_CLOCK_HZ / 2U / MCPWM_FREQ)   /* = 4200 */
+#define MCPWM_DEADTIME_CLOCKS  20U                                    /* ~119ns */
+#define MCPWM_TGRO_TIME        (MCPWM_PERIOD_CLOCKS - 10U)           /* = 4190 */
+#define MCPWM_RCR              0U                                    /* Repetition counter */
 
 /* USER CODE END Private defines */
 
