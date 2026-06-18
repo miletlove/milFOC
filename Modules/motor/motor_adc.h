@@ -17,6 +17,21 @@
 
 #include "general_def.h"
 #include "adc.h"
+#include "bsp_adc.h"
+
+/* ADC channel number enums (FalconFoc compatible) */
+typedef enum
+{
+    adc1_ch1 = 0,
+    adc1_ch2 = 1,
+    adc1_ch3 = 2,
+    adc1_ch4 = 3
+} adc1_num;
+
+typedef enum
+{
+    adc2_ch12 = 0,
+} adc2_num;
 
 /**
  * @brief Current measurement data structure
@@ -48,5 +63,29 @@ extern CURRENT_DATA current_data;
  * @param  temp: output temperature [degC]
  */
 void GetTempNtc(uint16_t adc_value, float *temp);
+
+/**
+ * @brief  ADC1 median filter (noise rejection)
+ * @param  channel: ADC1 channel index (adc1_ch1..ch4)
+ * @return filtered ADC value
+ */
+uint16_t adc1_median_filter(uint8_t channel);
+
+/**
+ * @brief  ADC1 average filter (ripple reduction)
+ * @param  channel: ADC1 channel index
+ * @return filtered ADC value
+ */
+uint16_t adc1_avg_filter(uint8_t channel);
+
+/**
+ * @brief  ADC2 median filter
+ */
+uint16_t adc2_median_filter(uint8_t channel);
+
+/**
+ * @brief  ADC2 average filter
+ */
+uint16_t adc2_avg_filter(uint8_t channel);
 
 #endif /* MOTOR_ADC_H */

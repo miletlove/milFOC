@@ -1,52 +1,57 @@
 ﻿/**
  ******************************************************************************
  * @file    can_driver.h
- * @author  milFOC Team
- * @brief   CAN communication protocol driver.
- *          Handles command frame parsing and telemetry frame packing
- *          on top of the BSP CAN layer (bsp_can.h).
- *
- * @note    Protocol frame format (up to 8 bytes):
- *          CMD frame:  [cmd_id:4B][data:4B]
- *          TELEM frame: [state:4B][velocity:2B][position:2B]
+ * @author  Zhang jia ming (FalconFoc) / milFOC Team
+ * @brief   CAN communication protocol driver with frame packing (header/tail/CRC8)
+ *          and daemon integration for online detection.
  ******************************************************************************
  */
 
 #ifndef CAN_DRIVER_H
 #define CAN_DRIVER_H
 
-#include "general_def.h"
+#include "daemon.h"
 #include "bsp_can.h"
-#include "stdint.h"
 
-/**
- * @brief CAN communication instance (wraps BSP CAN with protocol layer)
- */
+#define MX_FDCAN_COMM_COUNT      4
+#define FDCAN_COMM_MAX_BUFFSIZE  200
+#define FDCAN_COMM_HEADER        's'
+#define FDCAN_COMM_TAIL          'e'
+#define FDCAN_COMM_OFFSET_BYTES  4
+
+#pragma pack(1)
 typedef struct
 {
-    FDCAN_HandleTypeDef *fdcan_handle;  /* CAN peripheral handle */
-    uint16_t tx_id;                     /* TX message ID */
-    uint16_t rx_id;                     /* RX filter ID */
-    uint8_t send_data_len;              /* TX payload length */
-    uint8_t recv_data_len;              /* RX payload length */
+    FDCANInstance *can_ins;
+
+    uint8_t send_data_len;
+    uint8_t send_buf_len;
+    uint8_t raw_sendbuf[FDCAN_COMM_MAX_BUFFSIZE + FDCAN_COMM_OFFSET_BYTES];
+
+    uint8_t recv_data_len;
+    uint8_t recv_buf_len;
+    uint8_t raw_recvbuf[FDCAN_COMM_MAX_BUFFSIZE + FDCAN_COMM_OFFSET_BYTES];
+    uint8_t unpacked_recv_data[FDCAN_COMM_MAX_BUFFSIZE];
+
+    uint8_t recv_state;
+    uint8_t cur_recv_len;
+    uint8_t update_flag;
+
+    DaemonInstance *comm_daemon;
 } FDCANCommInstance;
+#pragma pack()
 
-/**
- * @brief CAN communication initialization config
- */
 typedef struct
 {
-    FDCAN_HandleTypeDef *fdcan_handle;  /* CAN peripheral handle */
-    uint16_t tx_id;                     /* TX message ID */
-    uint16_t rx_id;                     /* RX filter ID */
-    uint8_t send_data_len;              /* TX data length */
-    uint8_t recv_data_len;              /* RX data length */
+    FDCAN_Init_Config_s can_config;
+    uint8_t  send_data_len;
+    uint8_t  recv_data_len;
+    uint16_t daemon_count;
 } FDCANComm_Init_Config_s;
 
-/* --- Public API --- */
-
-FDCANCommInstance *FDCANCommInit(FDCANComm_Init_Config_s *config);
-void *FDCANCommGet(FDCANCommInstance *ins);
-int FDCANCommSend(FDCANCommInstance *ins, void *data);
+FDCANCommInstance *FDCANCommInit(FDCANComm_Init_Config_s *comm_config);
+void    FDCANCommSend(FDCANCommInstance *instance, uint8_t *data);
+void   *FDCANCommGet(FDCANCommInstance *instance);
+uint8_t FDCANCommIsOnline(FDCANCommInstance *instance);
 
 #endif /* CAN_DRIVER_H */

@@ -29,11 +29,14 @@ static float last_position = 0.0f;
 void RobotCMDInit(void)
 {
     FDCANComm_Init_Config_s config = {
-        .fdcan_handle  = &hfdcan1,
-        .tx_id         = FDCAN_M4_ID + FC_MOTOR_ID,
-        .rx_id         = FDCAN_M4_ID,
+        .can_config = {
+            .fdcan_handle = &hfdcan1,
+            .tx_id        = FDCAN_M4_ID + FC_MOTOR_ID,
+            .rx_id        = FDCAN_M4_ID,
+        },
         .send_data_len = sizeof(cmd_tx),
         .recv_data_len = sizeof(cmd_rx),
+        .daemon_count  = 10,
     };
     ins = FDCANCommInit(&config);
     LOGINFO("[CMD] Command dispatch initialized (CAN ID=0x%03X)", FDCAN_M4_ID);
@@ -106,6 +109,6 @@ void RobotCMDTask(void)
     cmd_tx.cmd_tx_iq    = motor_data.components.foc->i_q;
     cmd_tx.cmd_tx_vbus  = motor_data.components.foc->vbus;
 
-    FDCANCommSend(ins, (void *)&cmd_tx);
+    FDCANCommSend(ins, (uint8_t *)&cmd_tx);
     memset(&cmd_rx, 0, sizeof(Cmd_Rx_s));
 }

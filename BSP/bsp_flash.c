@@ -1,96 +1,84 @@
 /**
  ******************************************************************************
  * @file    bsp_flash.c
- * @author  milFOC Team
- * @brief   Internal Flash BSP implementation for STM32G431 NVM storage.
- *
- * @note    Uses HAL_FLASHEx APIs for G4 series.
- *          Flash must be erased per page before programming.
- *          All operations require disabling IRQs during flash write.
+ * @author  Zhang jia ming (FalconFoc) / milFOC Team
+ * @brief   Flash BSP implementation — page-level erase & write for STM32G431.
  ******************************************************************************
  */
 
 #include "bsp_flash.h"
-#include "bsp_log.h"
 #include "string.h"
 
-/**
- * @brief  Erase NVM flash pages
- */
+static uint32_t get_page(uint32_t addr)
+{
+    return (addr - FLASH_BASE) / FLASH_PAGE_SIZE;
+}
+
+uint8_t flash_bsp_erase_pages(uint32_t start_addr, uint32_t end_addr)
+{
+    uint32_t page_err = 0;
+    FLASH_EraseInitTypeDef EraseInit;
+
+    HAL_FLASH_Unlock();
+    __HAL_FLASH_CLEAR_FLAG(FLASH_FLAG_OPTVERR);
+
+    uint32_t FirstPage = get_page(start_addr);
+    uint32_t NbOfPages = get_page(end_addr) - FirstPage + 1;
+
+    EraseInit.TypeErase = FLASH_TYPEERASE_PAGES;
+    EraseInit.Page      = FirstPage;
+    EraseInit.NbPages   = NbOfPages;
+    if (HAL_FLASHEx_Erase(&EraseInit, &page_err) != HAL_OK)
+        return 0;
+    HAL_FLASH_Lock();
+    return 1;
+}
+
+uint8_t flash_bsp_erase_page(uint8_t page)
+{
+    uint32_t page_err = 0;
+    FLASH_EraseInitTypeDef EraseInit;
+
+    HAL_FLASH_Unlock();
+    __HAL_FLASH_CLEAR_FLAG(FLASH_FLAG_OPTVERR);
+
+    EraseInit.TypeErase = FLASH_TYPEERASE_PAGES;
+    EraseInit.Page      = page;
+    EraseInit.NbPages   = 1;
+    if (HAL_FLASHEx_Erase(&EraseInit, &page_err) != HAL_OK)
+        return 0;
+    HAL_FLASH_Lock();
+    return 1;
+}
+
+void flash_bsp_write_data(uint32_t addr, void *data, uint32_t size)
+{
+    uint64_t *buffer    = (uint64_t *)data;
+    uint32_t  temp_addr = addr;
+
+    HAL_FLASH_Unlock();
+    for (uint32_t i = 0; i < size; i += 8)
+    {
+        HAL_FLASH_Program(FLASH_TYPEPROGRAM_DOUBLEWORD, temp_addr + i, *buffer);
+        buffer++;
+    }
+    HAL_FLASH_Lock();
+}
+
+/* --- milFOC NVM compatibility layer --- */
+
 int flash_erase_nvm(void)
 {
-    HAL_StatusTypeDef status;
-    FLASH_EraseInitTypeDef erase_init;
-    uint32_t page_error;
-
-    /* Unlock flash */
-    HAL_FLASH_Unlock();
-
-    /* Configure erase */
-    erase_init.TypeErase    = FLASH_TYPEERASE_PAGES;
-    erase_init.Banks        = FLASH_BANK_1;
-    erase_init.Page         = (FLASH_NVM_START_ADDR - 0x08000000) / FLASH_NVM_PAGE_SIZE;
-    erase_init.NbPages      = FLASH_NVM_SIZE / FLASH_NVM_PAGE_SIZE;
-
-    __disable_irq();
-    status = HAL_FLASHEx_Erase(&erase_init, &page_error);
-    __enable_irq();
-
-    HAL_FLASH_Lock();
-
-    if (status != HAL_OK)
-    {
-        LOGERROR("[FLASH] Erase failed at page %lu", page_error);
-        return -1;
-    }
-
-    LOGINFO("[FLASH] NVM pages erased (addr=0x%08X, size=%d)", FLASH_NVM_START_ADDR, FLASH_NVM_SIZE);
-    return 0;
+    return flash_bsp_erase_page(63);  /* Use last page for NVM storage */
 }
 
-/**
- * @brief  Write 64-bit double-words to NVM flash
- */
 int flash_write_nvm(uint32_t addr, uint64_t *data, uint32_t len)
 {
-    HAL_StatusTypeDef status = HAL_OK;
-
-    if (addr < FLASH_NVM_START_ADDR || (addr + len * 8) > (FLASH_NVM_START_ADDR + FLASH_NVM_SIZE))
-    {
-        LOGERROR("[FLASH] Write address out of NVM range");
-        return -1;
-    }
-
-    HAL_FLASH_Unlock();
-
-    __disable_irq();
-    for (uint32_t i = 0; i < len; i++)
-    {
-        status = HAL_FLASH_Program(FLASH_TYPEPROGRAM_DOUBLEWORD, addr + i * 8, data[i]);
-        if (status != HAL_OK) break;
-    }
-    __enable_irq();
-
-    HAL_FLASH_Lock();
-
-    if (status != HAL_OK)
-    {
-        LOGERROR("[FLASH] Write failed at addr=0x%08X", addr);
-        return -1;
-    }
-
+    flash_bsp_write_data(addr, data, len);
     return 0;
 }
 
-/**
- * @brief  Read from NVM flash area
- */
 void flash_read_nvm(uint32_t addr, uint8_t *data, uint32_t len)
 {
-    if (addr < FLASH_NVM_START_ADDR || (addr + len) > (FLASH_NVM_START_ADDR + FLASH_NVM_SIZE))
-    {
-        LOGERROR("[FLASH] Read address out of NVM range");
-        return;
-    }
     memcpy(data, (void *)addr, len);
 }

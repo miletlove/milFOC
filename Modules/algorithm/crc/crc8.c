@@ -53,3 +53,14 @@ uint8_t crc8_calc(const uint8_t *data, uint32_t len)
     }
     return crc;
 }
+
+/* Alias for crc8_calc (FalconFoc compatibility) */
+uint8_t crc_8(const uint8_t *input_str, uint16_t num_bytes)
+{
+    return crc8_calc(input_str, num_bytes);
+}
+
+uint8_t update_crc_8(uint8_t crc, uint8_t val)
+{
+    return crc8_table[val ^ crc];
+}

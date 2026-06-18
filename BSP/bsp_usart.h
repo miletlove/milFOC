@@ -1,60 +1,50 @@
 /**
  ******************************************************************************
  * @file    bsp_usart.h
- * @author  milFOC Team
- * @brief   USART Board Support Package - Multi-instance serial abstraction.
- *          Supports DMA and IT transfer modes.
- *
- * @note    Hardware: USART1 on PB6 (TX) / PB7 (RX)
+ * @author  Zhang jia ming (FalconFoc) / milFOC Team
+ * @brief   USART peripheral driver — multi-instance registration with DMA/IT
+ *          receive callback and non-blocking send.
  ******************************************************************************
  */
 
 #ifndef BSP_USART_H
 #define BSP_USART_H
 
-#include "general_def.h"
+#include <stdint.h>
 #include "usart.h"
+#include "main.h"
 
-/* Transfer mode enumeration */
+#define DEVICE_USART_CNT   5
+#define USART_RXBUFF_LIMIT 256
+
+typedef void (*usart_module_callback)(void);
+
 typedef enum
 {
     USART_TRANSFER_NONE = 0,
-    USART_TRANSFER_IT,      /* Interrupt-based transfer */
-    USART_TRANSFER_DMA,     /* DMA-based transfer */
-} USART_TransferMode;
+    USART_TRANSFER_BLOCKING,
+    USART_TRANSFER_IT,
+    USART_TRANSFER_DMA,
+} USART_TRANSFER_MODE;
 
-/* USART instance structure */
 typedef struct
 {
+    uint8_t  recv_buff[USART_RXBUFF_LIMIT];
+    uint8_t  recv_buff_size;
     UART_HandleTypeDef *usart_handle;
-    USART_TransferMode tx_mode;
-    USART_TransferMode rx_mode;
-    uint8_t rx_buff[256];
-    uint16_t rx_len;
+    usart_module_callback module_callback;
 } USARTInstance;
 
-/* USART init configuration */
 typedef struct
 {
+    uint8_t  recv_buff_size;
     UART_HandleTypeDef *usart_handle;
+    usart_module_callback module_callback;
 } USART_Init_Config_s;
 
-/* --- Public API --- */
-
-/**
- * @brief  Register a USART instance
- * @param  config: pointer to init configuration
- * @return Pointer to registered USARTInstance
- */
-USARTInstance *USARTRegister(USART_Init_Config_s *config);
-
-/**
- * @brief  Send data via USART
- * @param  instance: target USART instance
- * @param  data: pointer to data buffer
- * @param  len: data length in bytes
- * @param  mode: transfer mode (IT or DMA)
- */
-void USARTSend(USARTInstance *instance, uint8_t *data, uint16_t len, USART_TransferMode mode);
+void USARTServiceInit(USARTInstance *_instance);
+USARTInstance *USARTRegister(USART_Init_Config_s *USART_config);
+void USARTSend(USARTInstance *_instance, uint8_t *send_buf, uint16_t send_size, USART_TRANSFER_MODE mode);
+uint8_t USARTIsReady(USARTInstance *_instance);
 
 #endif /* BSP_USART_H */

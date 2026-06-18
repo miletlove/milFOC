@@ -53,3 +53,36 @@ uint16_t crc16_calc(const uint8_t *data, uint32_t len)
     }
     return crc;
 }
+
+/* ======================== FalconFoc compatibility API ====================== */
+
+/* CRC-16 (standard, same as crc16_calc) */
+uint16_t crc_16(const uint8_t *input_str, uint16_t num_bytes)
+{
+    return crc16_calc(input_str, num_bytes);
+}
+
+/* CRC-16 Modbus (same algorithm, different start value convention) */
+uint16_t crc_modbus(const uint8_t *input_str, uint16_t num_bytes)
+{
+    uint16_t crc = CRC_START_MODBUS;
+    const uint8_t *ptr = input_str;
+    if (ptr != NULL) {
+        for (uint16_t a = 0; a < num_bytes; a++) {
+            crc = (crc >> 8) ^ crc16_table[(crc ^ (uint16_t)*ptr++) & 0x00FF];
+        }
+    }
+    return crc;
+}
+
+/* Streaming update — useful for incremental CRC over multiple buffers */
+uint16_t update_crc_16(uint16_t crc, uint8_t c)
+{
+    return (crc >> 8) ^ crc16_table[(crc ^ (uint16_t)c) & 0x00FF];
+}
+
+/* Table initializer (table is already pre-computed, kept for API compatibility) */
+void init_crc16_tab(void)
+{
+    /* CRC-16 table is statically initialized — no runtime init needed */
+}
