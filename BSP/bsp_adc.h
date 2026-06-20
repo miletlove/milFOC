@@ -1,3 +1,11 @@
+/*
+ * @Author: Yangzhi_Liu 3068126392@qq.com
+ * @Date: 2026-06-18 00:55:25
+ * @LastEditors: Yangzhi_Liu 3068126392@qq.com
+ * @LastEditTime: 2026-06-20 03:16:27
+ * @FilePath: \milFOC\BSP\bsp_adc.h
+ * @Description: 这是默认设置,请设置`customMade`, 打开koroFileHeader查看配置 进行设置: https://github.com/OBKoro1/koro1FileHeader/wiki/%E9%85%8D%E7%BD%AE
+ */
 /**
  ******************************************************************************
  * @file    bsp_adc.h
@@ -32,9 +40,19 @@
 #define ADC2_CHANNELS 1
 #define ADC2_BUF_LEN (ADC2_SAMPLES * ADC2_CHANNELS)
 
-/* ADC conversion factors (to be tuned per hardware) */
-#define FAC_CURRENT       (3.3f / 4096.0f / 0.01f)  /* ADC raw -> Amps (via shunt R & opamp gain) */
-#define VOLTAGE_TO_ADC_FACTOR (3.3f / 4096.0f * 11.0f) /* ADC raw -> Bus voltage */
+/* ADC hardware parameters (FalconFoc compatible) */
+/* --- Current Sensing --- */
+#define V_REG             1.65f             /* ADC reference midpoint [V] */
+#define CURRENT_SHUNT_RES 0.002f            /* Shunt resistor [Ohm] — 2mΩ */
+#define CURRENT_AMP_GAIN  50.0f             /* Op-amp gain [V/V] */
+#define FAC_CURRENT       ((3.3f / 4095.0f) / (CURRENT_SHUNT_RES * CURRENT_AMP_GAIN))
+                                            /* ADC raw -> Amps: ~0.806 mA/LSB */
+
+/* --- Bus Voltage Sensing (Resistive Divider) --- */
+#define VIN_R1            1000.0f           /* Top resistor [Ohm] */
+#define VIN_R2            10000.0f          /* Bottom resistor [Ohm] */
+#define VOLTAGE_TO_ADC_FACTOR (((VIN_R2 + VIN_R1) / VIN_R1) * (3.3f / 4095.0f))
+                                            /* ADC raw -> Bus voltage [V] */
 
 extern uint16_t adc1_dma_value[ADC1_SAMPLES][ADC1_CHANNELS];
 extern uint16_t adc2_dma_value[ADC2_SAMPLES][ADC2_CHANNELS];

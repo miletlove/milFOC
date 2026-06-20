@@ -24,20 +24,13 @@ uint16_t adc2_dma_value[ADC2_SAMPLES][ADC2_CHANNELS];
  */
 void adc_bsp_init(void)
 {
-    /* Start ADC1 DMA for regular conversions (if used for monitoring) */
-    HAL_ADC_Start_DMA(&hadc1, (uint32_t *)adc1_dma_value, ADC1_BUF_LEN);
-
 #if ADC_INJECTED_ENABLE
-    /* Configure ADC1 injected group:
-     * JDR1 = CUR_C (PA2)
-     * JDR2 = CUR_B (PA1)
-     * JDR3 = CUR_A (PA0)
-     * JDR4 = VBUS  (PB1)
-     * Triggered by TIM1 TRGO at PWM center-aligned peak
+    /* Start ADC1 injected group with interrupt:
+     * JDR1 = CUR_C (PA2), JDR2 = CUR_B (PA1),
+     * JDR3 = CUR_A (PA0), JDR4 = VBUS  (PB1)
+     * Triggered by TIM1 CH4 OC_REF at PWM center-aligned peak.
+     * The injected channel mapping is configured in CubeMX (.ioc file).
      */
-    // Note: The injected channel mapping is done in CubeMX (.ioc file)
-    // This function starts the injected conversion and enables JEOC interrupt.
-
     HAL_ADCEx_InjectedStart_IT(&hadc1);
 #endif
 

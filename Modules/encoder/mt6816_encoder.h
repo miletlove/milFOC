@@ -24,11 +24,11 @@
 #define MT6816_MAX_DELAY    (10)       /* SPI read timeout [us] */
 
 /* ======================== SPI Chip Select Macros =========================== */
-/* milFOC uses SPI1 for MT6816 (PA5=SCK, PA6=MISO, PA7=MOSI) */
+/* milFOC uses SPI1 for MT6816 (PA5=SCK, PA6=MISO, PA7=MOSI, PB12=CSN) */
 #define MT6816_SPI_Get_HSPI  (hspi1)
-/* CS pin: TODO - configure in CubeMX and update pin definitions */
-#define MT6816_SPI_CS_L()    HAL_GPIO_WritePin(GPIOA, GPIO_PIN_4, GPIO_PIN_RESET)
-#define MT6816_SPI_CS_H()    HAL_GPIO_WritePin(GPIOA, GPIO_PIN_4, GPIO_PIN_SET)
+/* CS pin: PB12 (SPI1_CS), defined in CubeMX main.h */
+#define MT6816_SPI_CS_L()    HAL_GPIO_WritePin(SPI1_CS_GPIO_Port, SPI1_CS_Pin, GPIO_PIN_RESET)
+#define MT6816_SPI_CS_H()    HAL_GPIO_WritePin(SPI1_CS_GPIO_Port, SPI1_CS_Pin, GPIO_PIN_SET)
 
 /* ======================== MT6816 Register Addresses ======================== */
 #define MT6816_Init_Reg       (0x00)       /* Initialization register */
@@ -68,8 +68,8 @@ typedef enum
 typedef struct ENCODER_DATA
 {
     SPI_HandleTypeDef *hspi;
-    GPIO_TypeDef *CS_Port;
-    uint16_t CS_Pin;
+    uint8_t  tx_dma[3];           /* DMA TX buffer: {0x83, 0x00, 0x00} */
+    uint8_t  rx_dma[3];           /* DMA RX buffer: [dummy, angle_hi, angle_lo] */
 
     uint32_t angle;             /* Raw 14-bit angle from MT6816 */
     uint8_t rx_err_count;       /* SPI read error counter */

@@ -13,7 +13,7 @@
  */
 
 #include "bldc_motor.h"
-#include <math.h>
+#include "arm_math.h"
 
 /* ======================== Global FOC Data Instance ========================= */
 FOC_DATA foc_data = {
@@ -115,8 +115,8 @@ void SetPwm(FOC_DATA *foc)
  */
 void Sin_Cos_Val(FOC_DATA *foc)
 {
-    foc->sin_val = sinf(foc->theta);
-    foc->cos_val = cosf(foc->theta);
+    foc->sin_val = arm_sin_f32(foc->theta);
+    foc->cos_val = arm_cos_f32(foc->theta);
 }
 
 /* ======================== FOC Core Transforms ============================== */
@@ -206,6 +206,102 @@ void Svpwm_Midpoint(FOC_DATA *foc)
     foc->dtc_a = CLAMP((vcom - va) + 0.5f, 0.0f, 1.0f);
     foc->dtc_b = CLAMP((vcom - vb) + 0.5f, 0.0f, 1.0f);
     foc->dtc_c = CLAMP((vcom - vc) + 0.5f, 0.0f, 1.0f);
+}
+
+/**
+ * @brief  7-segment SVPWM sector-based modulation (FalconFoc compatible)
+ *
+ *         Determines the sector from alpha-beta voltages, then computes
+ *         vector timings and converts to center-aligned PWM duty cycles.
+ *
+ *         This is the primary SVPWM method used in FalconFoc.
+ *         Svpwm_Midpoint is an alternative midpoint injection method.
+ */
+void Svpwm_Sector(FOC_DATA *foc)
+{
+    float ta = 0.0f, tb = 0.0f, tc = 0.0f;
+    float k  = (TS * _SQRT3) * foc->inv_vbus;
+    float va = foc->v_beta;
+    float vb = (_SQRT3 * foc->v_alpha - foc->v_beta) * 0.5f;
+    float vc = (-_SQRT3 * foc->v_alpha - foc->v_beta) * 0.5f;
+    int a = (va > 0.0f) ? 1 : 0;
+    int b = (vb > 0.0f) ? 1 : 0;
+    int c = (vc > 0.0f) ? 1 : 0;
+    int sextant = (c << 2) + (b << 1) + a;
+
+    switch (sextant)
+    {
+    case 3: /* Sector 3 */
+    {
+        float t4 = k * vb;
+        float t6 = k * va;
+        float t0 = (TS - t4 - t6) * 0.5f;
+        ta = t4 + t6 + t0;
+        tb = t6 + t0;
+        tc = t0;
+    }
+    break;
+    case 1: /* Sector 1 */
+    {
+        float t6 = -k * vc;
+        float t2 = -k * vb;
+        float t0 = (TS - t2 - t6) * 0.5f;
+        ta = t6 + t0;
+        tb = t2 + t6 + t0;
+        tc = t0;
+    }
+    break;
+    case 5: /* Sector 5 */
+    {
+        float t2 = k * va;
+        float t3 = k * vc;
+        float t0 = (TS - t2 - t3) * 0.5f;
+        ta = t0;
+        tb = t2 + t3 + t0;
+        tc = t3 + t0;
+    }
+    break;
+    case 4: /* Sector 4 */
+    {
+        float t1 = -k * va;
+        float t3 = -k * vb;
+        float t0 = (TS - t1 - t3) * 0.5f;
+        ta = t0;
+        tb = t3 + t0;
+        tc = t1 + t3 + t0;
+    }
+    break;
+    case 6: /* Sector 6 */
+    {
+        float t1 = k * vc;
+        float t5 = k * vb;
+        float t0 = (TS - t1 - t5) * 0.5f;
+        ta = t5 + t0;
+        tb = t0;
+        tc = t1 + t5 + t0;
+    }
+    break;
+    case 2: /* Sector 2 */
+    {
+        float t4 = -k * vc;
+        float t5 = -k * va;
+        float t0 = (TS - t4 - t5) * 0.5f;
+        ta = t4 + t5 + t0;
+        tb = t0;
+        tc = t5 + t0;
+    }
+    break;
+    default:
+        break;
+    }
+
+    /* Convert vector timings to duty cycles [0, 1]
+     * Note: FalconFoc uses inverted logic: dtc = 1.0 - t_high
+     * where t_high is the high-side conduction time fraction.
+     * This matches TIM1 PWM1 mode where CNT < CCR → output HIGH. */
+    foc->dtc_a = CLAMP(1.0f - ta, 0.0f, 1.0f);
+    foc->dtc_b = CLAMP(1.0f - tb, 0.0f, 1.0f);
+    foc->dtc_c = CLAMP(1.0f - tc, 0.0f, 1.0f);
 }
 
 /* ======================== FOC Lifecycle ==================================== */

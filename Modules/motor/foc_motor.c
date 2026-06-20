@@ -23,6 +23,16 @@
 #include "motor_adc.h"
 #include "mt6816_encoder.h"
 
+/* ==================== Open-Loop Demo Parameters ========================= */
+/*
+ * CONTROL_MODE_OPEN: fixed-speed rotating voltage vector.
+ * Speed is electrical (mech speed = elec_speed / pole_pairs).
+ * Adjust DEMO_VOLTAGE to control current (start low, increase if motor
+ * doesn't move; too high may over-current).
+ */
+#define DEMO_SPEED_RPS   2.0f   /* Electrical revs per second */
+#define DEMO_VOLTAGE     0.35f  /* Voltage magnitude [0~1] — 0.35×24=8.4V @24V */
+
 /* ======================== Global Motor Instance ============================ */
 
 MOTOR_DATA motor_data = {
@@ -238,75 +248,137 @@ void Init_Motor_Calib(MOTOR_DATA *motor)
 /**
  * @brief  Main FOC state machine task (called from JEOC interrupt @ 20kHz)
  *
- *         This is the highest-priority real-time task. It must complete
- *         within ~15us to meet 20kHz timing requirements.
+ *         State transitions:
+ *           IDLE → DETECTING(CURRENT_CALIBRATING, 0.1s) → RUNNING(OPEN_LOOP)
  *
- *         Execution flow:
- *         1. Check state machine
- *         2. If RUNNING: execute FOC control based on Control_Mode
- *         3. If DETECTING: execute calibration sequence
- *         4. Update PWM outputs
+ *         In open-loop: electrical angle advances at fixed speed,
+ *         constant voltage vector applied → motor rotates.
  */
 void MotorStateTask(MOTOR_DATA *motor)
 {
-    /* --- State: GUARD (fault protection) --- */
+    /* ================================================================
+     * STATE: IDLE — auto-transition to DETECTING
+     * ================================================================ */
+    if (motor->state.State_Mode == STATE_MODE_IDLE)
+    {
+        /* Clear all PID integrators */
+        PID_Clear(&motor->IqPID);
+        PID_Clear(&motor->IdPID);
+        PID_Clear(&motor->VelPID);
+        PID_Clear(&motor->PosPID);
+
+        /* Enter detection state → run current offset calibration */
+        motor->state.State_Mode = STATE_MODE_DETECTING;
+        motor->state.Sub_State  = CURRENT_CALIBRATING;
+        motor->state.Control_Mode = CONTROL_MODE_OPEN;
+
+        LOGINFO("[FOC] IDLE → DETECTING (current offset calibration)");
+        return;
+    }
+
+    /* ================================================================
+     * STATE: GUARD (fault) — stop PWM, hold
+     * ================================================================ */
     if (motor->state.State_Mode == STATE_MODE_GUARD)
     {
-        /* PWM outputs are disabled by hardware break; hold safe state */
         return;
     }
 
-    /* --- State: DETECTING (auto-calibration) --- */
+    /* ================================================================
+     * STATE: DETECTING — run current offset calibration
+     *          Collect ADC raw samples for 0.1s → compute offsets
+     *          → transition to RUNNING
+     * ================================================================ */
     if (motor->state.State_Mode == STATE_MODE_DETECTING)
     {
-        /* TODO: Implement calibration sequence state machine
-         * - CURRENT_CALIBRATING: sample ADC offsets
-         * - RSLS_CALIBRATING: inject test voltage, measure R and L
-         * - ENCODER_CALIBRATING: rotate motor, build LUT
-         */
+        static uint32_t calib_cnt = 0;
+        static uint64_t sum_a = 0, sum_b = 0, sum_c = 0;
+
+        /* Accumulate ADC raw values */
+        sum_a += motor->components.current->hadc->Instance->JDR3;
+        sum_b += motor->components.current->hadc->Instance->JDR2;
+        sum_c += motor->components.current->hadc->Instance->JDR1;
+        calib_cnt++;
+
+        /* Use 50% duty as safe output during calibration */
+        FOC_DATA *f = motor->components.foc;
+        f->dtc_a = 0.50f;
+        f->dtc_b = 0.50f;
+        f->dtc_c = 0.50f;
+        SetPwm(f);
+
+        /* Init VOFA display channels (zero during calibration) */
+        f->v_a = f->v_b = f->v_c = 0.0f;
+        f->i_alpha = f->i_beta = 0.0f;
+        f->i_d = f->i_q = 0.0f;
+
+        /* After ~0.1s (2000 samples @ 20kHz), compute offsets */
+        if (calib_cnt >= 2000)
+        {
+            motor->components.current->Ia_offset =
+                (float)sum_a / (float)calib_cnt;
+            motor->components.current->Ib_offset =
+                (float)sum_b / (float)calib_cnt;
+            motor->components.current->Ic_offset =
+                (float)sum_c / (float)calib_cnt;
+
+            /* Update current PI gains from motor parameters */
+            FOC_update_current_gain(motor);
+
+            /* Transition to RUNNING */
+            motor->state.State_Mode = STATE_MODE_RUNNING;
+            calib_cnt = 0;
+            sum_a = sum_b = sum_c = 0;
+
+            LOGINFO("[FOC] Calib done → RUNNING (open-loop, %.1f rps elec)",
+                    DEMO_SPEED_RPS);
+        }
         return;
     }
 
-    /* --- State: RUNNING (normal FOC operation) --- */
+    /* ================================================================
+     * STATE: RUNNING — open-loop FOC rotation
+     *          Advance electrical angle at constant speed,
+     *          apply fixed Vd=0, Vq=voltage → InvPark → SVPWM → PWM
+     * ================================================================ */
     if (motor->state.State_Mode != STATE_MODE_RUNNING) return;
 
-    /* --- FOC Core Calculation --- */
+    FOC_DATA *f = motor->components.foc;
 
-    /* Step 1: Compute sin/cos for current electrical angle */
-    Sin_Cos_Val(motor->components.foc);
+    /* ---- Open-loop angle advance ---- */
+    /* Ts = 1/20000 = 50us; theta += omega_elec * Ts */
+    float omega_elec = DEMO_SPEED_RPS * M_2PI;  /* rad/s electrical */
+    f->theta += omega_elec * CURRENT_MEASURE_PERIOD;
+    f->theta = wrap_pm_pi(f->theta);            /* wrap to [-π, π] */
 
-    /* Step 2: Clarke transform (abc -> alpha-beta) */
-    Clarke(motor->components.foc);
+    /* ---- Read currents for VOFA display ---- */
+    /* (offsets already calibrated, so i_a/i_b/i_c ≈ 0 at idle) */
+    /* Already done in motor_task.c ISR before this call */
 
-    /* Step 3: Park transform (alpha-beta -> d-q) */
-    Park(motor->components.foc);
+    /* ---- Compute sin/cos for display + transforms ---- */
+    Sin_Cos_Val(f);
 
-    /* Step 4: Current PI control based on control mode */
+    /* ---- Clarke + Park (for VOFA display only) ---- */
+    Clarke(f);
+    Park(f);
 
-    /* Default: Id = 0 (MTPA for SPMSM), Iq = torque-producing current */
-    float id_ref = 0.0f;
-    float iq_ref = motor->Controller.torque_setpoint / motor->Controller.torque_const;
+    /* ---- Open-loop voltage command ---- */
+    f->v_d = 0.0f;
+    f->v_q = DEMO_VOLTAGE;   /* 0.15 = 15% bus voltage */
 
-    /* Clamp current references */
-    iq_ref = CLAMP(iq_ref, -motor->Controller.current_limit,
-                   motor->Controller.current_limit);
+    /* ---- Inverse Park: dq → αβ ---- */
+    Inv_Park(f);
 
-    /* Run D-axis current PI */
-    motor->components.foc->v_d = PID_Calc(&motor->IdPID,
-        motor->components.foc->i_d, id_ref);
+    /* ---- Reconstruct phase voltages for VOFA ---- */
+    f->v_a = f->v_alpha;
+    f->v_b = -0.5f * f->v_alpha + _SQRT3_2 * f->v_beta;
+    f->v_c = -0.5f * f->v_alpha - _SQRT3_2 * f->v_beta;
 
-    /* Run Q-axis current PI */
-    motor->components.foc->v_q = PID_Calc(&motor->IqPID,
-        motor->components.foc->i_q, iq_ref);
+    /* ---- SVPWM: αβ → duty cycles ---- */
+    Svpwm_Sector(f);
 
-    /* Step 5: Inverse Park transform (d-q -> alpha-beta) */
-    Inv_Park(motor->components.foc);
-
-    /* Step 6: SVPWM modulation (alpha-beta -> duty cycles) */
-    Svpwm_Midpoint(motor->components.foc);
-
-    /* Step 7: Write duty cycles to TIM1 CCR registers */
-    SetPwm(motor->components.foc);
+    /* ---- Write to PWM ---- */
+    SetPwm(f);
 }
 
 /**

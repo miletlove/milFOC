@@ -23,6 +23,8 @@
 
 ENCODER_DATA encoder_data = {
     .hspi                = &MT6816_SPI_Get_HSPI,
+    .tx_dma              = {MT6816_Angle_Reg, 0x00, 0x00},
+    .rx_dma              = {0, 0, 0},
     .pole_pairs          = MPTOR_P,
     .dir                 = MOTOR_DIRECTION,
     .encoder_offset      = MOTOR_OFFSET,
@@ -72,17 +74,15 @@ void GetMotor_Angle(ENCODER_DATA *encoder)
         pll_init_done = 1;
     }
 
-    /* --- Step 1: Read raw angle from MT6816 via SPI --- */
-    uint16_t tx_data = MT6816_Angle_Reg | 0x8000;  /* Read command + parity placeholder */
-    uint16_t rx_data = 0;
-
+    /* --- Step 1: Read raw angle via SPI+DMA (3-byte transfer) --- */
     MT6816_SPI_CS_L();
-    HAL_SPI_TransmitReceive(encoder->hspi, (uint8_t *)&tx_data,
-                            (uint8_t *)&rx_data, 1, MT6816_MAX_DELAY);
+    HAL_SPI_TransmitReceive_DMA(encoder->hspi, encoder->tx_dma, encoder->rx_dma, 3);
+    while (HAL_SPI_GetState(encoder->hspi) != HAL_SPI_STATE_READY) { __NOP(); }
     MT6816_SPI_CS_H();
 
-    /* Extract 14-bit angle (bits 13:0) */
-    encoder->raw = (int)(rx_data & 0x3FFF);
+    /* rx_dma[0]=dummy, rx_dma[1]=angle[15:8], rx_dma[2]=angle[7:0] */
+    uint16_t rawAngle = ((uint16_t)encoder->rx_dma[1] << 8) | encoder->rx_dma[2];
+    encoder->raw = (int)(rawAngle & 0x3FFF);
 
     /* TODO: Parity check on bits 15:14 */
 
