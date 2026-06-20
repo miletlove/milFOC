@@ -21,7 +21,9 @@
 #include "mt6816_encoder.h"
 #include "motor_adc.h"
 
+/* ======================== Build Mode Select ================================ */
 #define NO_ENCODER       1    /* 1=virtual angle, 0=MT6816 (PLL) */
+#define CALC_TEST_MODE   1    /* 1=calc_test branch: JEOC callback is no-op */
 
 /**
  * @brief  ADC1 Injected Conversion Complete Callback

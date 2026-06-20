@@ -31,7 +31,9 @@
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
-#include "mt6816_encoder.h"
+#include "calc_test_task.h"
+#include "bldc_motor.h"
+#include "bsp_dwt.h"
 #include "usbd_cdc_if.h"
 #include <stdio.h>
 #include <string.h>
@@ -109,29 +111,62 @@ int main(void)
   MX_SPI1_Init();
   /* USER CODE BEGIN 2 */
 
-  const char *banner = "=== MT6816 Encoder DMA Test ===\r\n";
+  /* --- Init DWT for microsecond-precision timing --- */
+  DWT_Init(168);  /* STM32G431 @ 168MHz */
+
+  /* --- Start TIM1 PWM @ 50% duty (for ADC trigger generation only) --- */
+  /* TIM1 CH4 OC_REF triggers ADC1 injected group at PWM center.
+   * Duty cycles remain at 50% — NO motor voltage applied.
+   * This is ESSENTIAL for real ADC sampling. */
+  Foc_Pwm_Start();
+
+  /* --- Print banner via USB CDC --- */
+  const char *banner =
+      "\r\n========================================\r\n"
+      "  milFOC — Open-Loop FOC Validation\r\n"
+      "  Bus: 24V | Speed: 5 rad/s mech\r\n"
+      "  Virtual Encoder + Real ADC + VOFA\r\n"
+      "========================================\r\n";
   CDC_Transmit_FS((uint8_t *)banner, strlen(banner));
+
+  /* --- Initialize calc_test environment --- */
+  /* Starts ADC1 injected group in polled mode (no JEOC interrupt).
+   * ADC is triggered by TIM1 CH4 at 20kHz center-aligned PWM peak. */
+  CalcTest_Init();
+
+  char init_msg[128];
+  snprintf(init_msg, sizeof(init_msg),
+           "[CALC] Init OK | Vbus=%.1fV | Omega_mech=%.1f rad/s | "
+           "PolePairs=%u | Omega_elec=%.1f rad/s | Ts=%.1f us\r\n",
+           CALC_TEST_VBUS,
+           CALC_TEST_OMEGA_MECH,
+           CALC_TEST_POLE_PAIRS,
+           CALC_TEST_OMEGA_MECH * CALC_TEST_POLE_PAIRS,
+           CALC_TEST_TS * 1e6f);
+  CDC_Transmit_FS((uint8_t *)init_msg, strlen(init_msg));
+
   /* USER CODE END 2 */
 
   /* Infinite loop */
   /* USER CODE BEGIN WHILE */
+
+  uint64_t last_tick = 0;  /* DWT timing reference (outside loop for clarity) */
+
   while (1)
   {
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
-    GetMotor_Angle(&encoder_data);
+    uint64_t now = DWT_GetTimeline_us();
+    uint64_t elapsed = now - last_tick;
 
-    char buf[64];
-    sprintf(buf, "%d,%.4f,%.4f,%d,%d\r\n",
-            encoder_data.raw,
-            (double)encoder_data.phase_,
-            (double)encoder_data.vel_estimate_,
-            (int)encoder_data.rx_dma[1],
-            (int)encoder_data.rx_dma[2]);
-    CDC_Transmit_FS((uint8_t *)buf, strlen(buf));
-
-    for (volatile uint32_t d = 0; d < 600000; d++) { __NOP(); }
+    /* Target: 50us period (20kHz) */
+    if (elapsed >= 50u)
+    {
+        last_tick = now;
+        CalcTest_Step();
+    }
+    /* CPU is mostly idle — DWT timing is non-blocking */
   }
   /* USER CODE END 3 */
 }
