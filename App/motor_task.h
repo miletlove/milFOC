@@ -21,6 +21,8 @@
 #include "mt6816_encoder.h"
 #include "motor_adc.h"
 
+#define NO_ENCODER       1    /* 1=virtual angle, 0=MT6816 (PLL) */
+
 /**
  * @brief  ADC1 Injected Conversion Complete Callback
  *

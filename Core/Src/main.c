@@ -18,7 +18,6 @@
 /* USER CODE END Header */
 /* Includes ------------------------------------------------------------------*/
 #include "main.h"
-#include "cmsis_os.h"
 #include "adc.h"
 #include "crc.h"
 #include "dma.h"
@@ -32,20 +31,20 @@
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
+#include "mt6816_encoder.h"
 #include "usbd_cdc_if.h"
-#include "can_test.h" 
-#include "usart_test.h"
+#include <stdio.h>
+#include <string.h>
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
 /* USER CODE BEGIN PTD */
-uint8_t tick =0;
+
 /* USER CODE END PTD */
 
 /* Private define ------------------------------------------------------------*/
 /* USER CODE BEGIN PD */
-uint8_t TxData[8] = {0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77, 0x88};
-FDCAN_TxHeaderTypeDef TxHeader;
+
 /* USER CODE END PD */
 
 /* Private macro -------------------------------------------------------------*/
@@ -61,7 +60,6 @@ FDCAN_TxHeaderTypeDef TxHeader;
 
 /* Private function prototypes -----------------------------------------------*/
 void SystemClock_Config(void);
-void MX_FREERTOS_Init(void);
 /* USER CODE BEGIN PFP */
 
 /* USER CODE END PFP */
@@ -102,6 +100,7 @@ int main(void)
   MX_GPIO_Init();
   MX_DMA_Init();
   MX_TIM1_Init();
+  MX_USB_Device_Init();
   MX_RNG_Init();
   MX_CRC_Init();
   MX_FDCAN1_Init();
@@ -109,19 +108,10 @@ int main(void)
   MX_USART1_UART_Init();
   MX_SPI1_Init();
   /* USER CODE BEGIN 2 */
-  HAL_TIM_Base_Start_IT(&htim1);
-  HAL_Delay(50);
-  CAN_Test_Init();
-  USART_Test_Init();
+
+  const char *banner = "=== MT6816 Encoder DMA Test ===\r\n";
+  CDC_Transmit_FS((uint8_t *)banner, strlen(banner));
   /* USER CODE END 2 */
-
-  /* Call init function for freertos objects (in cmsis_os2.c) */
-  MX_FREERTOS_Init();
-
-  /* Start scheduler */
-  osKernelStart();
-
-  /* We should never get here as control is now taken by the scheduler */
 
   /* Infinite loop */
   /* USER CODE BEGIN WHILE */
@@ -130,9 +120,18 @@ int main(void)
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
-    USART_Test_Task();
-    HAL_Delay(500);
+    GetMotor_Angle(&encoder_data);
 
+    char buf[64];
+    sprintf(buf, "%d,%.4f,%.4f,%d,%d\r\n",
+            encoder_data.raw,
+            (double)encoder_data.phase_,
+            (double)encoder_data.vel_estimate_,
+            (int)encoder_data.rx_dma[1],
+            (int)encoder_data.rx_dma[2]);
+    CDC_Transmit_FS((uint8_t *)buf, strlen(buf));
+
+    for (volatile uint32_t d = 0; d < 600000; d++) { __NOP(); }
   }
   /* USER CODE END 3 */
 }
@@ -184,22 +183,30 @@ void SystemClock_Config(void)
 }
 
 /* USER CODE BEGIN 4 */
+
+/* USER CODE END 4 */
+
+/**
+  * @brief  Period elapsed callback in non blocking mode
+  * @note   This function is called  when TIM17 interrupt took place, inside
+  * HAL_TIM_IRQHandler(). It makes a direct call to HAL_IncTick() to increment
+  * a global variable "uwTick" used as application time base.
+  * @param  htim : TIM handle
+  * @retval None
+  */
 void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
 {
-    if (htim->Instance == TIM17)
-    {
-        HAL_IncTick();
-    }
-    else if (htim->Instance == TIM1)
-    {
-        tick++;
-        if (tick >= 100)
-        {
-            tick = 0;
-        }
-    }
+  /* USER CODE BEGIN Callback 0 */
+
+  /* USER CODE END Callback 0 */
+  if (htim->Instance == TIM17)
+  {
+    HAL_IncTick();
+  }
+  /* USER CODE BEGIN Callback 1 */
+
+  /* USER CODE END Callback 1 */
 }
-/* USER CODE END 4 */
 
 /**
   * @brief  This function is executed in case of error occurrence.

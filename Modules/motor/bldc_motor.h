@@ -20,6 +20,7 @@
 
 #include "general_def.h"
 #include "tim.h"
+#include "arm_math.h"
 
 /* ======================== Motor Selection ================================= */
 #define MOTOR_5010_750KV 1     /* Target: 5010 750KV PMSM/BLDC */
@@ -120,6 +121,7 @@
 #define PWM_FREQUENCY       20000                   /* PWM frequency [Hz] */
 #define PWM_MEASURE_PERIOD  (1.0f / (float)PWM_FREQUENCY)  /* PWM period [s] */
 #define CURRENT_MEASURE_PERIOD  PWM_MEASURE_PERIOD
+#define TS                     1.0f    /* SVPWM sampling period normalized to 1 */
 
 /* ======================== FOC Data Structure ============================== */
 
@@ -236,6 +238,13 @@ void Inv_Park(FOC_DATA *foc);
  *        Includes bipolar-to-unipolar offset (0.5) for TIM1 center-aligned mode.
  */
 void Svpwm_Midpoint(FOC_DATA *foc);
+
+/**
+ * @brief 7-segment SVPWM sector-based modulation (FalconFoc compatible)
+ *        Determines sector from alpha-beta voltages and computes
+ *        vector timings -> duty cycles.
+ */
+void Svpwm_Sector(FOC_DATA *foc);
 
 /* --- FOC Lifecycle --- */
 
