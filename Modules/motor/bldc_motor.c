@@ -99,6 +99,11 @@ void Foc_Pwm_LowSides(void)
 
 /**
  * @brief  Write computed duty cycles to TIM1 CCR registers
+ *
+ * @note   With CCR preload enabled (OCxPE=1 in main.c), all 3 writes
+ *         go to shadow registers and are transferred atomically to active
+ *         registers at the next TIM1 UPDATE event (center-aligned: twice
+ *         per PWM period). This prevents inter-phase duty cycle tearing.
  */
 void SetPwm(FOC_DATA *foc)
 {

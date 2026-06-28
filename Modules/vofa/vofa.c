@@ -8,7 +8,6 @@
 #include "bldc_motor.h"
 #include "mt6816_encoder.h"
 #include "motor_task.h"
-#include "calc_test_task.h"
 #include "usbd_cdc_if.h"
 #include "string.h"
 
@@ -81,38 +80,6 @@ void Vofa_Packet(void)
     fw[5] = motor_data.components.foc->vbus;        /* CH6: Bus voltage */
     vofa_firewater_send(fw, 6);
 #endif
-}
-
-/**
- * @brief  Send calc_test VOFA data (default 200Hz = every 100 FOC steps)
- *
- *         10-channel FireWater frame:
- *         theta, dtc_a%, dtc_b%, dtc_c%, i_a_filt, i_b_filt, i_c_filt, i_a_raw, vbus_raw, vbus[V]
- *
- *         CH1:   theta       — 电角度 [rad]
- *         CH2-4: dtc_a/b/c%  — SVPWM计算占空比 [0-100%] (反映PWMA/B/C_H开关状态)
- *         CH5-7: i_a/b/c_filt — 三相电流 LP滤波后 [A] (闭环控制用此值)
- *         CH8:   i_a_raw     — A 相 ADC 原始值 (噪声诊断: 与 CH5对比)
- *         CH9:   vbus_raw    — 母线 ADC 原始值
- *         CH10:  vbus        — 母线电压 [V]
- */
-void Vofa_CalcTest_Send(CALC_TEST *ct)
-{
-    if (ct == NULL) return;
-
-    float fw[10];
-    fw[0] = ct->encoder.theta;          /* CH1:  电角度 [rad] */
-    fw[1] = ct->foc.dtc_a * 100.0f;     /* CH2:  PWMA_H 占空比 [%] */
-    fw[2] = ct->foc.dtc_b * 100.0f;     /* CH3:  PWMB_H 占空比 [%] */
-    fw[3] = ct->foc.dtc_c * 100.0f;     /* CH4:  PWMC_H 占空比 [%] */
-    fw[4] = ct->adc.i_a_filt;           /* CH5:  A相电流 LP滤波 [A] */
-    fw[5] = ct->adc.i_b_filt;           /* CH6:  B相电流 LP滤波 [A] */
-    fw[6] = ct->adc.i_c_filt;           /* CH7:  C相电流 LP滤波 [A] */
-    fw[7] = (float)ct->adc.i_a_raw;     /* CH8:  A相ADC原始值 (噪声对比) */
-    fw[8] = (float)ct->adc.vbus_raw;    /* CH9:  母线ADC原始值 */
-    fw[9] = ct->adc.vbus;               /* CH10: 母线电压 [V] */
-
-    vofa_firewater_send(fw, 10);
 }
 
 void vofa_Receive(uint8_t *buf, uint16_t len)

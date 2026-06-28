@@ -22,7 +22,7 @@
 #include "usbd_cdc_if.h"
 
 /* USER CODE BEGIN INCLUDE */
-
+#include "bringup_task.h"
 /* USER CODE END INCLUDE */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -263,6 +263,15 @@ static int8_t CDC_Receive_FS(uint8_t* Buf, uint32_t *Len)
   /* USER CODE BEGIN 6 */
   USBD_CDC_SetRxBuffer(&hUsbDeviceFS, &Buf[0]);
   USBD_CDC_ReceivePacket(&hUsbDeviceFS);
+
+  /* Feed received bytes to Bring-Up command parser */
+  if (Len != NULL && *Len > 0)
+  {
+    for (uint32_t i = 0; i < *Len; i++)
+    {
+      BringUp_FeedChar(Buf[i]);
+    }
+  }
   return (USBD_OK);
   /* USER CODE END 6 */
 }

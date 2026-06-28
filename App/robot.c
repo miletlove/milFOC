@@ -41,17 +41,14 @@ void RobotInit(void)
     /* Wait for MT6816 encoder power-up (16ms no-output period) */
     DWT_Delay(0.016f);
 
-    /* Initialize BSP layer (DWT first) */
-    BSPInit();
+    /* Initialize BSP layer (DWT + PWM + CCR preload) */
+    BSP_Init();
 
     /* Initialize log system on USART1 */
     LogInit(&huart1);
 
     /* Initialize ADC for FOC current sampling */
     adc_bsp_init();
-
-    /* Start PWM outputs (50% duty, safe pre-charge state) */
-    Foc_Pwm_Start();
 
     /* LED: indicate ready */
     RGB_DisplayColorById(0);  /* Red = initialized, waiting for command */

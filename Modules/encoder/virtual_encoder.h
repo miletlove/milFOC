@@ -7,9 +7,8 @@
  *          generating electrical angle, raw MT6816-like counts, and
  *          sin/cos values for Park/InvPark transforms.
  *
- * @note    Used in calc_test branch for open-loop FOC verification.
+ * @note    Virtual encoder for FOC bring-up and open-loop testing.
  *          Replaces MT6816 hardware encoder in simulation mode.
- *          Pole pairs: 7 (5010 750KV motor)
  ******************************************************************************
  */
 

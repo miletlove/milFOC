@@ -31,12 +31,10 @@
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
-#include "calc_test_task.h"
-#include "bldc_motor.h"
+#include "bsp_init.h"
 #include "bsp_dwt.h"
+#include "bringup_task.h"
 #include "usbd_cdc_if.h"
-#include <stdio.h>
-#include <string.h>
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -111,46 +109,21 @@ int main(void)
   MX_SPI1_Init();
   /* USER CODE BEGIN 2 */
 
-  /* --- Init DWT for microsecond-precision timing --- */
-  DWT_Init(168);  /* STM32G431 @ 168MHz */
+  /* ── Unified BSP init: DWT + TIM1 PWM + CCR preload ── */
+  BSP_Init();
 
-  /* --- Start TIM1 PWM @ 50% duty (for ADC trigger generation only) --- */
-  /* TIM1 CH4 OC_REF triggers ADC1 injected group at PWM center.
-   * Duty cycles remain at 50% — NO motor voltage applied.
-   * This is ESSENTIAL for real ADC sampling. */
-  Foc_Pwm_Start();
-
-  /* --- Print banner via USB CDC --- */
-  const char *banner =
-      "\r\n========================================\r\n"
-      "  milFOC — Open-Loop FOC Validation\r\n"
-      "  Bus: 24V | Speed: 5 rad/s mech\r\n"
-      "  Virtual Encoder + Real ADC + VOFA\r\n"
-      "========================================\r\n";
-  CDC_Transmit_FS((uint8_t *)banner, strlen(banner));
-
-  /* --- Initialize calc_test environment --- */
-  /* Starts ADC1 injected group in polled mode (no JEOC interrupt).
-   * ADC is triggered by TIM1 CH4 at 20kHz center-aligned PWM peak. */
-  CalcTest_Init();
-
-  char init_msg[128];
-  snprintf(init_msg, sizeof(init_msg),
-           "[CALC] Init OK | Vbus=%.1fV | Omega_mech=%.1f rad/s | "
-           "PolePairs=%u | Omega_elec=%.1f rad/s | Ts=%.1f us\r\n",
-           CALC_TEST_VBUS,
-           CALC_TEST_OMEGA_MECH,
-           CALC_TEST_POLE_PAIRS,
-           CALC_TEST_OMEGA_MECH * CALC_TEST_POLE_PAIRS,
-           CALC_TEST_TS * 1e6f);
-  CDC_Transmit_FS((uint8_t *)init_msg, strlen(init_msg));
+  /* ── Bring-Up state machine (starts per BRINGUP_STAGE macro) ── */
+  BringUp_Init();
 
   /* USER CODE END 2 */
 
   /* Infinite loop */
   /* USER CODE BEGIN WHILE */
 
-  uint64_t last_tick = 0;  /* DWT timing reference (outside loop for clarity) */
+  uint64_t last_tick = 0;
+
+  /* Seed timing reference to avoid boot-time burst execution */
+  last_tick = DWT_GetTimeline_us();
 
   while (1)
   {
@@ -158,15 +131,28 @@ int main(void)
 
     /* USER CODE BEGIN 3 */
     uint64_t now = DWT_GetTimeline_us();
-    uint64_t elapsed = now - last_tick;
 
-    /* Target: 50us period (20kHz) */
-    if (elapsed >= 50u)
+    /* ── FOC loop: 20kHz (50µs period) ── */
+    if ((now - last_tick) >= 50u)
     {
-        last_tick = now;
-        CalcTest_Step();
+        last_tick += 50u;   /* Accumulative → auto-corrects jitter */
+        BringUp_Step();
+
+        /* Sub-rate tasks (counters advance per FOC step) */
+        static uint32_t cmd_tick = 0u;
+        static uint32_t telem_tick = 0u;
+
+        if (++cmd_tick >= BRINGUP_CMD_POLL_DIV)
+        {
+            cmd_tick = 0u;
+            BringUp_ProcessCmd();
+        }
+        if (++telem_tick >= BRINGUP_TELEMETRY_DIV)
+        {
+            telem_tick = 0u;
+            BringUp_Telemetry();
+        }
     }
-    /* CPU is mostly idle — DWT timing is non-blocking */
   }
   /* USER CODE END 3 */
 }

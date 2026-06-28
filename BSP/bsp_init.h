@@ -2,35 +2,24 @@
  ******************************************************************************
  * @file    bsp_init.h
  * @author  milFOC Team
- * @brief   BSP layer unified initialization entry point.
- *          Initializes only essential BSP components (DWT).
- *          Other BSP peripherals (CAN, USART, etc.) are initialized by their
- *          respective module registrations.
+ * @brief   Unified BSP hardware initialization entry point.
  *
- * @note    Must be called BEFORE RTOS starts and BEFORE any interrupts enabled.
- *          Currently called by RobotInit() in App layer.
+ *          Consolidates all post-CubeMX hardware setup that was previously
+ *          scattered in main.c:
+ *          - DWT cycle counter (μs-precision timing)
+ *          - TIM1 PWM start + CCR preload (atomic 3-phase update)
+ *          - ADC1 injected group start (TIM1-triggered, polled)
+ *
+ * @note    Call BSP_Init() once after all MX_*_Init() in main.c.
  ******************************************************************************
  */
 
 #ifndef BSP_INIT_H
 #define BSP_INIT_H
 
+#include "main.h"
 #include "bsp_dwt.h"
-#include "bsp_adc.h"
-#include "bsp_can.h"
-#include "bsp_usart.h"
-#include "bsp_log.h"
-#include "bsp_flash.h"
 
-/**
- * @brief  Unified BSP initialization
- * @note   Initializes DWT only. Other BSP components are initialized
- *         on-demand via their respective Register/Init functions.
- */
-static inline void BSPInit(void)
-{
-    /* Initialize DWT with 168 MHz core clock */
-    DWT_Init(168);
-}
+void BSP_Init(void);
 
 #endif /* BSP_INIT_H */

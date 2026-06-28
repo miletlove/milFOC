@@ -11,7 +11,7 @@
  *          For STM32G431, sin/cos should use CORDIC accelerator when possible.
  *
  * Hardware-specific motor parameters are configured via macros.
- * Target motor: 5010 750KV BLDC
+ * Target motor: 5010 KV360 PMSM (24V / 23A / 0.12Ω / 50μH / 7pp)
  ******************************************************************************
  */
 
@@ -23,27 +23,28 @@
 #include "arm_math.h"
 
 /* ======================== Motor Selection ================================= */
-#define MOTOR_5010_750KV 1     /* Target: 5010 750KV PMSM/BLDC */
-#define MOTOR_PM3510     0
-#define MOTOR_DJI2312    0
+#define MOTOR_5010_KV360  1     /* Target: 5010 KV360 PMSM (24V/23A/8600RPM) */
+#define MOTOR_5010_750KV  0
+#define MOTOR_PM3510      0
+#define MOTOR_DJI2312     0
 
 /* ======================== Battery Configuration ============================ */
-#define N_BASE       3.0f             /* 3S battery */
-#define BATVEL       (4.0f * N_BASE)  /* Nominal battery voltage */
+#define N_BASE       6.0f             /* 6S LiPo battery (24V nominal) */
+#define BATVEL       (4.0f * N_BASE)  /* Nominal battery voltage = 24.0V */
 #define INVBATVEL    (1.0f / BATVEL)  /* Reciprocal for normalization */
 
 /* Pre-calibration flag: set 0 for first boot (auto-calibrate), then 1 */
-#define PRE_CALIBRATED 0
+#define PRE_CALIBRATED 1   /* Using manufacturer datasheet values */
 
-/* ======================== Motor 5010 750KV Parameters ====================== */
-#if MOTOR_5010_750KV
+/* ======================== Motor 5010 KV360 Parameters ====================== */
+#if MOTOR_5010_KV360
 #if PRE_CALIBRATED
-/* TODO: Fill in calibrated values after running auto-calibration */
-#define MPTOR_P         7u               /* Pole pairs */
-#define MOTOR_RS        0.2f             /* Phase resistance (Ohm) - TODO: calibrate */
-#define MOTOR_LS        0.00005f         /* Phase inductance (H) - TODO: calibrate */
-#define MOTOR_FLUX      0.0f             /* Rotor flux linkage (Wb) */
-#define MOTOR_OFFSET    0                /* Encoder offset */
+/* Manufacturer datasheet values for 5010-KV360 */
+#define MPTOR_P         7u               /* Pole pairs (14-pole rotor) */
+#define MOTOR_RS        0.12f            /* Phase resistance [Ω] */
+#define MOTOR_LS        0.00005f         /* Phase inductance [H] (50μH) */
+#define MOTOR_FLUX      0.0021f          /* Rotor flux linkage [Wb] */
+#define MOTOR_OFFSET    0                /* Encoder offset (auto-calibrate later) */
 #define MOTOR_DIRECTION UNKNOWN          /* CW=1, CCW=-1, UNKNOWN=0 */
 #else
 #define MPTOR_P         0u               /* Auto-detect */
@@ -54,22 +55,22 @@
 #define MOTOR_DIRECTION UNKNOWN
 #endif
 
-/* Control parameters for 5010 750KV */
+/* Control parameters for 5010 KV360 (24V / 8600RPM / 23A) */
 #define MOTOR_INERTIA              0.0001f     /* Rotor inertia [A/(turn/s^2)] */
-#define MOTOR_CURRENT_RAMP_RATE    0.001f      /* Torque ramp rate [Nm/s] */
-#define MOTOR_VEL_RAMP_RATE        15.0f       /* Velocity ramp rate [(turn/s)/s] */
-#define MOTOR_TRAJ_VEL             15.0f       /* Max trajectory velocity [turn/s] */
-#define MOTOR_TRAJ_ACCEL           5.0f        /* Trajectory acceleration [(turn/s)/s] */
-#define MOTOR_TRAJ_DECEL           5.0f        /* Trajectory deceleration [(turn/s)/s] */
-#define MOTOR_TORQUE_CONST         0.05f       /* Torque constant [Nm/A] - TODO: measure */
-#define MOTOR_TORQUE_LIMIT         0.1f        /* Torque limit [Nm] */
-#define MOTOR_VEL_LIMIT            50.0f       /* Velocity limit [turn/s] (750KV*12V) */
-#define MOTOR_VOLTAGE_LIMIT        12.0f       /* Voltage limit [V] */
-#define MOTOR_CURRENT_LIMIT        2.0f        /* Current limit [A] */
+#define MOTOR_CURRENT_RAMP_RATE    0.005f      /* Torque ramp rate [Nm/s] */
+#define MOTOR_VEL_RAMP_RATE        30.0f       /* Velocity ramp rate [(turn/s)/s] */
+#define MOTOR_TRAJ_VEL             140.0f      /* Max trajectory velocity [turn/s] (~8400RPM) */
+#define MOTOR_TRAJ_ACCEL           10.0f       /* Trajectory acceleration [(turn/s)/s] */
+#define MOTOR_TRAJ_DECEL           10.0f       /* Trajectory deceleration [(turn/s)/s] */
+#define MOTOR_TORQUE_CONST         0.0265f     /* Torque constant [Nm/A] = 60/(2π×360Kv) */
+#define MOTOR_TORQUE_LIMIT         0.25f       /* Torque limit [Nm] (rated torque) */
+#define MOTOR_VEL_LIMIT            143.0f      /* Velocity limit [turn/s] (8600RPM/60) */
+#define MOTOR_VOLTAGE_LIMIT        24.0f       /* Voltage limit [V] (6S LiPo) */
+#define MOTOR_CURRENT_LIMIT        23.0f       /* Current limit [A] (max continuous) */
 #define MOTOR_CURRENT_CTRL_P_GAIN  0.0f        /* Auto-calculated after calibration */
 #define MOTOR_CURRENT_CTRL_I_GAIN  0.0f        /* Auto-calculated after calibration */
-#define MOTOR_CURRENT_CTRL_BANDWIDTH 230.0f    /* Current loop bandwidth [rad/s] */
-#define MOTOR_INPUT_CURRENT        0.5f        /* Default input current [A] */
+#define MOTOR_CURRENT_CTRL_BANDWIDTH 800.0f    /* Current loop bandwidth [rad/s] (~127Hz) */
+#define MOTOR_INPUT_CURRENT        1.0f        /* Default input current [A] */
 #define MOTOR_INPUT_TORQUE         0.0f
 #define MOTOR_INPUT_VELOCITY       0.0f
 #define MOTOR_INPUT_POSITION       0.0f
@@ -88,7 +89,7 @@
 #define MOTOR_POS_PID_KI 0.0f
 #define MOTOR_POS_PID_KD 0.0f
 
-#endif /* MOTOR_5010_750KV */
+#endif /* MOTOR_5010_KV360 */
 
 /* ======================== PID Output Limits =============================== */
 #define CURRENT_PID_MAX_OUT  ((BATVEL) / _SQRT3)
